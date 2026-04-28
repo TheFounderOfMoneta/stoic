@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.log
+node_modules/
+web/node_modules/
+web/dist/
+.pytest_cache/
+api/.pytest_cache/
+__pycache__/
+*.pyc
+data/postgre/
+data/ingest/telegram/sessions/
+data/ingest/telegram/exports/
+requirements/

@@ -1,0 +1,6 @@
+telegram/sessions/
+telegram/sessions/*
+telegram/exports/
+telegram/exports/*
+!telegram/sessions/.gitkeep
+!telegram/exports/.gitkeep
