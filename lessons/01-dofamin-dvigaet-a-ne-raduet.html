@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Дофамин двигает, а не радует</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --ground:#EFF1F3;
+  --surface:#FBFCFD;
+  --surface-2:#E7EAEE;
+  --ink:#15181C;
+  --ink-soft:#3A424C;
+  --muted:#5E6672;
+  --rule:#D3D8DE;
+  --rule-soft:#E1E5EA;
+
+  --want:#A8471B;
+  --learn:#7E5A0E;
+  --like:#8C2D5E;
+  --mood:#454A78;
+  --value:#1B5C68;
+  --alarm:#96182B;
+
+  --want-bg:#F6E7DE;
+  --learn-bg:#F4EDD9;
+  --like-bg:#F6E3EC;
+  --mood-bg:#E5E7F4;
+  --value-bg:#DDECEE;
+  --alarm-bg:#F7E2E4;
+
+  --measure:35rem;
+  --aside:14rem;
+  --sans:"IBM Plex Sans","Segoe UI",Roboto,Arial,sans-serif;
+  --serif:"Literata","Georgia",serif;
+  --mono:"IBM Plex Mono","SF Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F1216;
+    --surface:#171B21;
+    --surface-2:#20252C;
+    --ink:#E6E9ED;
+    --ink-soft:#C4CBD3;
+    --muted:#959EAA;
+    --rule:#2C323A;
+    --rule-soft:#242A31;
+
+    --want:#E08A55;
+    --learn:#D0AC55;
+    --like:#E183B2;
+    --mood:#9AA1DE;
+    --value:#5FB2C0;
+    --alarm:#EC8792;
+
+    --want-bg:#2C1D14;
+    --learn-bg:#292214;
+    --like-bg:#2B1721;
+    --mood-bg:#1C1E30;
+    --value-bg:#132428;
+    --alarm-bg:#2C1519;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F1216;
+  --surface:#171B21;
+  --surface-2:#20252C;
+  --ink:#E6E9ED;
+  --ink-soft:#C4CBD3;
+  --muted:#959EAA;
+  --rule:#2C323A;
+  --rule-soft:#242A31;
+
+  --want:#E08A55;
+  --learn:#D0AC55;
+  --like:#E183B2;
+  --mood:#9AA1DE;
+  --value:#5FB2C0;
+  --alarm:#EC8792;
+
+  --want-bg:#2C1D14;
+  --learn-bg:#292214;
+  --like-bg:#2B1721;
+  --mood-bg:#1C1E30;
+  --value-bg:#132428;
+  --alarm-bg:#2C1519;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:17px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--surface-2)}
+:focus-visible{outline:2px solid var(--want);outline-offset:3px;border-radius:2px}
+
+.lesson{width:min(100% - 2.25rem,51rem);margin-inline:auto;padding:0 0 5rem;display:flex;flex-direction:column;gap:1.15rem}
+.lesson > *{max-width:var(--measure)}
+.lesson > .wide{max-width:none}
+
+p{margin:0}
+h1,h2,h3{margin:0;font-family:var(--serif);text-wrap:balance;font-weight:600}
+strong{font-weight:600}
+em{font-style:italic}
+a{color:inherit;text-decoration-color:var(--rule);text-underline-offset:3px}
+a:hover{text-decoration-color:currentColor}
+
+/* ---------- header ---------- */
+.masthead{max-width:none;border-bottom:1px solid var(--rule);padding:3.2rem 0 1.9rem;margin-bottom:1.4rem;display:flex;flex-direction:column;gap:1.1rem}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:clamp(2.05rem,6vw,3.05rem);line-height:1.08;letter-spacing:-.015em;max-width:16ch}
+.dek{max-width:var(--measure);color:var(--ink-soft);font-size:1.06rem}
+
+/* ---------- section heads ---------- */
+.sec{max-width:none;margin-top:2.9rem;display:flex;flex-direction:column;gap:1.15rem}
+.sec > *{max-width:var(--measure)}
+.sec > .wide{max-width:none}
+.sec-head{display:flex;flex-direction:column;gap:.3rem;max-width:var(--measure)}
+.sec-head .eyebrow{color:var(--muted)}
+h2{font-size:1.62rem;line-height:1.2;letter-spacing:-.01em}
+h3{font-family:var(--sans);font-size:1rem;font-weight:600;letter-spacing:.005em}
+
+/* ---------- three sentences ---------- */
+.thesis{max-width:none;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.5rem 1.6rem;display:flex;flex-direction:column;gap:.85rem}
+.thesis .eyebrow{margin-bottom:.15rem}
+.thesis ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.85rem;counter-reset:t}
+.thesis li{counter-increment:t;display:grid;grid-template-columns:1.6rem minmax(0,1fr);gap:.65rem;max-width:var(--measure)}
+.thesis li > *{grid-column:2}
+.thesis li::before{content:counter(t);font-family:var(--mono);font-size:.82rem;color:var(--muted);padding-top:.28rem}
+
+/* ---------- margin notes ---------- */
+.note-row{max-width:none;display:grid;grid-template-columns:minmax(0,var(--measure)) minmax(0,var(--aside));gap:1.75rem;align-items:start}
+.note{font-family:var(--mono);font-size:.74rem;line-height:1.5;color:var(--muted);border-left:2px solid var(--rule);padding-left:.7rem}
+@media (max-width:62rem){
+  .note-row{grid-template-columns:1fr;gap:.7rem}
+  .note{max-width:var(--measure)}
+}
+
+/* ---------- chips ---------- */
+.chip{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;padding:.14em .5em;border-radius:2px;white-space:nowrap;vertical-align:.08em}
+.chip--want{background:var(--want-bg);color:var(--want)}
+.chip--learn{background:var(--learn-bg);color:var(--learn)}
+.chip--like{background:var(--like-bg);color:var(--like)}
+.chip--mood{background:var(--mood-bg);color:var(--mood)}
+.chip--value{background:var(--value-bg);color:var(--value)}
+
+/* ---------- worker cards ---------- */
+.workers{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}
+.worker{background:var(--surface);border:1px solid var(--rule);border-top:3px solid var(--wc);border-radius:3px;padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.6rem}
+.worker--want{--wc:var(--want)}
+.worker--like{--wc:var(--like)}
+.worker--value{--wc:var(--value)}
+.worker h3{font-family:var(--mono);font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--wc)}
+.worker .role{font-family:var(--serif);font-size:1.22rem;line-height:1.25;font-weight:600}
+.worker p{font-size:.94rem;color:var(--ink-soft)}
+.worker .tag{font-family:var(--mono);font-size:.71rem;line-height:1.45;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem;margin-top:.15rem}
+
+/* ---------- callout ---------- */
+.callout{max-width:none;background:var(--surface-2);border-radius:3px;padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:.7rem}
+.callout .lead{font-family:var(--serif);font-size:1.3rem;line-height:1.3;font-weight:600;max-width:26ch}
+.callout p{max-width:var(--measure);color:var(--ink-soft);font-size:.97rem}
+
+/* ---------- evidence cards ---------- */
+.evidence{max-width:none;display:flex;flex-direction:column;gap:.85rem}
+.ev{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.15rem 1.25rem;display:flex;flex-direction:column;gap:.9rem}
+.ev-top{display:flex;flex-wrap:wrap;gap:.5rem .7rem;align-items:baseline}
+.ev-top .claim{font-family:var(--serif);font-size:1.12rem;font-weight:600;line-height:1.3;flex:1 1 18rem;min-width:0}
+.ev dl{margin:0;display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:.42rem 1rem;font-size:.9rem}
+.ev dt{font-family:var(--mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding-top:.25rem}
+.ev dd{margin:0;color:var(--ink-soft)}
+.ev .src{font-family:var(--mono);font-size:.71rem;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem}
+@media (max-width:38rem){
+  .ev dl{grid-template-columns:1fr;gap:.15rem}
+  .ev dd{margin-bottom:.5rem}
+}
+
+/* ---------- table ---------- */
+.tablewrap{max-width:none;overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:44rem;font-size:.9rem}
+th,td{text-align:left;padding:.75rem .9rem;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td:first-child{white-space:nowrap}
+td .sysname{font-family:var(--mono);font-size:.74rem;letter-spacing:.07em;text-transform:uppercase}
+.r-want .sysname{color:var(--want)}
+.r-like .sysname{color:var(--like)}
+.r-learn .sysname{color:var(--learn)}
+.r-mood .sysname{color:var(--mood)}
+
+/* ---------- figures ---------- */
+figure{margin:0;max-width:none;display:flex;flex-direction:column;gap:.7rem}
+.figbox{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.35rem 1.2rem}
+.figbox svg{display:block;min-width:32rem;width:100%;height:auto}
+figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(--muted);max-width:var(--measure)}
+.svg-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase}
+.svg-name{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+.svg-body{font-family:var(--sans);font-size:12.5px}
+.svg-small{font-family:var(--sans);font-size:11.5px}
+
+/* ---------- know / invented ---------- */
+.split{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem}
+.panel{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.7rem}
+.panel .stamp{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;padding:.2em .55em;border-radius:2px;align-self:flex-start}
+.panel--know .stamp{background:var(--value-bg);color:var(--value)}
+.panel--made .stamp{background:var(--learn-bg);color:var(--learn)}
+.panel--hole .stamp{background:var(--alarm-bg);color:var(--alarm)}
+.panel ul{margin:0;padding-left:1.05rem;display:flex;flex-direction:column;gap:.55rem;font-size:.93rem;color:var(--ink-soft)}
+.panel li::marker{color:var(--muted)}
+
+/* ---------- debunked ---------- */
+.debunk{max-width:none;display:flex;flex-direction:column;gap:.7rem}
+.dbk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.9rem;align-items:start;border-left:3px solid var(--alarm);background:var(--surface);padding:.9rem 1.1rem;border-radius:0 3px 3px 0}
+.dbk .x{font-family:var(--mono);color:var(--alarm);font-size:.95rem;padding-top:.05rem}
+.dbk .what{font-weight:600;font-size:.96rem}
+.dbk .why{font-size:.9rem;color:var(--ink-soft);margin-top:.2rem}
+
+/* ---------- homework ---------- */
+.hw{max-width:none;border:1px solid var(--want);border-radius:3px;background:var(--surface);padding:1.5rem 1.55rem;display:flex;flex-direction:column;gap:1.1rem}
+.hw .eyebrow{color:var(--want)}
+.hw h2{font-size:1.35rem}
+.hw ol{margin:0;padding:0;list-style:none;counter-reset:h;display:flex;flex-direction:column;gap:.9rem}
+.hw ol li{counter-increment:h;display:grid;grid-template-columns:1.9rem 1fr;gap:.6rem;max-width:var(--measure)}
+.hw ol li::before{content:counter(h);font-family:var(--mono);font-size:.74rem;color:var(--want);border:1px solid var(--rule);border-radius:50%;width:1.5rem;height:1.5rem;display:grid;place-items:center;margin-top:.15rem}
+.hw p{max-width:var(--measure);font-size:.95rem;color:var(--ink-soft)}
+.hw .warn{font-size:.9rem;border-top:1px solid var(--rule-soft);padding-top:.85rem;color:var(--ink-soft)}
+.hw .warn b{color:var(--ink)}
+
+/* ---------- takeaways ---------- */
+.takeaway{max-width:none;border-top:2px solid var(--ink);padding-top:1.4rem;display:flex;flex-direction:column;gap:1.1rem}
+.takeaway ol{margin:0;padding:0;list-style:none;counter-reset:k;display:flex;flex-direction:column;gap:1rem}
+.takeaway li{counter-increment:k;display:grid;grid-template-columns:2.2rem 1fr;gap:.7rem;max-width:var(--measure)}
+.takeaway li::before{content:counter(k);font-family:var(--serif);font-size:1.5rem;font-weight:700;color:var(--muted);line-height:1}
+.takeaway .big{font-family:var(--serif);font-size:1.1rem;line-height:1.35;font-weight:600}
+.takeaway .sub{font-size:.93rem;color:var(--ink-soft);margin-top:.15rem}
+
+/* ---------- sources ---------- */
+.sources{max-width:none;margin-top:3rem;border-top:1px solid var(--rule);padding-top:1.3rem;display:flex;flex-direction:column;gap:.75rem}
+.sources ol{margin:0;padding-left:1.3rem;display:flex;flex-direction:column;gap:.6rem;font-family:var(--mono);font-size:.75rem;line-height:1.6;color:var(--muted)}
+.sources li::marker{color:var(--rule)}
+.sources a{color:var(--ink-soft)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<article class="lesson">
+
+  <header class="masthead">
+    <div class="eyebrow">Курс о мотивации · Урок 1 из 10</div>
+    <h1>Дофамин двигает, а не радует</h1>
+    <p class="dek">Слово «награда» склеивает вместе четыре разные вещи. Пока оно не разобрано, любой факт про мотивацию можно понять неправильно — и обычно понимают неправильно.</p>
+  </header>
+
+  <section class="thesis">
+    <div class="eyebrow">Весь смысл в трёх предложениях</div>
+    <ol>
+      <li>В мозге нет одного «центра удовольствия»: под словом «награда» спрятаны как минимум четыре разные вещи, у них разные вещества, разные участки мозга и разные способы измерения.</li>
+      <li>Дофамин создаёт тягу и учит повторять то, что сработало лучше ожидания, — но само удовольствие делают другие вещества в других, очень маленьких участках.</li>
+      <li>Поэтому к любому факту про мотивацию первым делом нужен вопрос: а что тут измерили — тягу, удовольствие, обучение или настроение?</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">С чего начинается путаница</div>
+      <h2>Один вечер, три разных события</h2>
+    </div>
+
+    <p>Вы едете через весь город в ресторан. Час в дороге, пробки, вы торопитесь.</p>
+
+    <p>В этом вечере спрятаны три разные вещи.</p>
+
+    <p><strong>По дороге вас тянет.</strong> Вы готовы потратить час жизни. Тяга — это то, что заставляет вас ехать.</p>
+
+    <p><strong>За столом вы пробуете.</strong> Вкусно или не очень. Это происходит во рту и длится ровно столько, сколько вы жуёте.</p>
+
+    <p><strong>На выходе вы делаете вывод.</strong> Было лучше или хуже, чем вы ждали. Возвращаться сюда или нет.</p>
+
+    <p>Эти три вещи разнесены во времени. И они умеют расходиться. Вы можете ехать час — и разочароваться. Можете не хотеть идти — и получить лучший ужин года.</p>
+
+    <div class="note-row">
+      <p>В быту мы называем весь вечер одним словом: «удовольствие от ресторана». В научных статьях весь вечер тоже часто называют одним словом — «награда». И вот здесь ломается понимание: два исследования могут употреблять одно слово, а измерять совершенно разные вещи.</p>
+      <aside class="note">В английском это слово <b>reward</b>. Оно встречается в тысячах статей и почти никогда не значит одно и то же.</aside>
+    </div>
+
+    <p>Дальше мы это слово разберём. На четыре части.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Рабочая метафора</div>
+      <h2>Три работника и одно табло</h2>
+    </div>
+
+    <p>Представьте, что внутри вас работают трое. У каждого своя узкая специальность, и никто не делает работу другого.</p>
+
+    <div class="workers wide">
+      <div class="worker worker--want">
+        <h3>Охотник</h3>
+        <div class="role">Тяга</div>
+        <p>Собака на поводке, которая тащит вас к ларьку с шаурмой. Она знает направление и тянет с силой. Она не пробует еду. Она не решает, стоит ли оно того. Она тянет.</p>
+        <p>У него есть и вторая работа: отмечать, вышло лучше или хуже ожидаемого, и подкручивать силу тяги на будущее.</p>
+        <div class="tag">Дофаминовые клетки среднего мозга, идущие в прилежащее ядро. Научно: мезолимбическая дофаминовая система.</div>
+      </div>
+
+      <div class="worker worker--like">
+        <h3>Дегустатор</h3>
+        <div class="role">Удовольствие</div>
+        <p>У него есть только язык. Он никуда не ходит и никого не тянет. Он ставит одну оценку: приятно или противно. И он крошечный — размером с горошину.</p>
+        <p>Работает на собственных опиоидах и эндоканнабиноидах мозга. Не на дофамине.</p>
+        <div class="tag">«Горячие точки» в оболочке прилежащего ядра и в бледном шаре. Ключевой рецептор: мю-опиоидный.</div>
+      </div>
+
+      <div class="worker worker--value">
+        <h3>Оценщик</h3>
+        <div class="role">Расчёт</div>
+        <p>Кассир. Переводит несравнимое в одну валюту: сон, деньги, вкус, статус — всё в одно число. Отдельно считает, во сколько усилий это обойдётся.</p>
+        <p>Он не тянет и не радуется. Он считает и разрешает.</p>
+        <div class="tag">Вентромедиальная префронтальная кора — общая ценность. Передняя поясная кора — цена усилия.</div>
+      </div>
+    </div>
+
+    <div class="note-row">
+      <p>И есть четвёртая вещь, которая <em>не работник</em>. Настроение. Это табло на стене: «как мне сейчас вообще». Оно ничего не производит, оно показывает сводку. Чью именно сводку — самый неожиданный пункт этого урока, к нему мы дойдём.</p>
+      <aside class="note">Метафора трёх работников — наша упаковка, не анатомический факт. В настоящем мозге границы размыты, одни и те же структуры участвуют в нескольких ролях. Держите это в голове.</aside>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Рабочий инструмент курса</div>
+      <h2>Четыре прибора</h2>
+    </div>
+
+    <p>Вот та же мысль без метафоры. Четыре системы, которые прячутся за словом «награда». Обратите внимание на последний столбец: <strong>это разные измерительные приборы</strong>. Разные приборы дают разные ответы, и переносить ответ одного на другой нельзя.</p>
+
+    <div class="tablewrap wide">
+      <table>
+        <thead>
+          <tr><th>Система</th><th>Что это по-человечески</th><th>Чем держится</th><th>Чем меряют</th></tr>
+        </thead>
+        <tbody>
+          <tr class="r-want">
+            <td><span class="sysname">Хотеть</span></td>
+            <td>Сила тяги, готовность действовать</td>
+            <td>Дофамин среднего мозга</td>
+            <td>Сколько усилий готов потратить; до какой цены доходит, прежде чем бросить; что выбирает; как быстро подходит</td>
+          </tr>
+          <tr class="r-like">
+            <td><span class="sysname">Нравиться</span></td>
+            <td>Само удовольствие</td>
+            <td>Мю-опиоиды и эндоканнабиноиды в горячих точках</td>
+            <td>Лицевые реакции у животных; оценка приятности <em>в момент</em> потребления</td>
+          </tr>
+          <tr class="r-learn">
+            <td><span class="sysname">Учиться</span></td>
+            <td>Сигнал «лучше или хуже, чем я ждал»</td>
+            <td>Дофамин, но это другая его работа</td>
+            <td>Как меняется выбор со временем; подгонка моделей обучения; активность полосатого тела</td>
+          </tr>
+          <tr class="r-mood">
+            <td><span class="sysname">Настроение</span></td>
+            <td>Общий фон «как мне сейчас»</td>
+            <td>Сборная величина, отдельного вещества нет</td>
+            <td>Вопрос «насколько ты счастлив прямо сейчас» на ползунке</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note-row">
+      <p>Первые две строки — самая частая подмена. Их путают и в популярных статьях, и в научных пресс-релизах.</p>
+      <aside class="note">Научные названия: «хотеть» — incentive salience, «нравиться» — hedonic impact, «учиться» — reward prediction error.</aside>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Схема</div>
+      <h2>Кто когда говорит</h2>
+    </div>
+
+    <p>Работники не спорят между собой, потому что почти не встречаются. Они включаются в разные моменты одного и того же эпизода.</p>
+
+    <figure class="wide">
+      <div class="figbox">
+        <svg viewBox="0 0 900 300" role="img" aria-label="Схема одного эпизода: до события работают Охотник и Оценщик, во время события — Дегустатор, после события Охотник снова учится">
+          <text class="svg-label" x="40" y="34" style="fill:var(--muted)">До</text>
+          <text class="svg-label" x="325" y="34" style="fill:var(--muted)">Во время</text>
+          <text class="svg-label" x="565" y="34" style="fill:var(--muted)">После</text>
+
+          <rect x="40" y="48" width="270" height="102" rx="3" style="fill:var(--want-bg);stroke:var(--rule)"/>
+          <text class="svg-name" x="58" y="76" style="fill:var(--want)">Охотник</text>
+          <text class="svg-name" x="146" y="76" style="fill:var(--value)">Оценщик</text>
+          <text class="svg-body" x="58" y="102" style="fill:var(--ink-soft)">Тяга растёт. Кассир считает,</text>
+          <text class="svg-body" x="58" y="121" style="fill:var(--ink-soft)">во сколько это обойдётся.</text>
+          <text class="svg-body" x="58" y="140" style="fill:var(--ink-soft)">Никто ещё ничего не пробовал.</text>
+
+          <rect x="325" y="48" width="225" height="102" rx="3" style="fill:var(--like-bg);stroke:var(--rule)"/>
+          <text class="svg-name" x="343" y="76" style="fill:var(--like)">Дегустатор</text>
+          <text class="svg-body" x="343" y="102" style="fill:var(--ink-soft)">Вкусно или нет.</text>
+          <text class="svg-body" x="343" y="121" style="fill:var(--ink-soft)">Только пока еда во рту.</text>
+          <text class="svg-body" x="343" y="140" style="fill:var(--ink-soft)">Тяга здесь молчит.</text>
+
+          <rect x="565" y="48" width="295" height="102" rx="3" style="fill:var(--learn-bg);stroke:var(--rule)"/>
+          <text class="svg-name" x="583" y="76" style="fill:var(--learn)">Охотник снова</text>
+          <text class="svg-body" x="583" y="102" style="fill:var(--ink-soft)">Лучше или хуже, чем ожидалось?</text>
+          <text class="svg-body" x="583" y="121" style="fill:var(--ink-soft)">Ответ подкручивает силу тяги</text>
+          <text class="svg-body" x="583" y="140" style="fill:var(--ink-soft)">на следующий раз.</text>
+
+          <line x1="40" y1="182" x2="856" y2="182" style="stroke:var(--rule);stroke-width:1.5"/>
+          <path d="M856 176 L872 182 L856 188 Z" style="fill:var(--rule)"/>
+          <text class="svg-label" x="872" y="200" text-anchor="end" style="fill:var(--muted)">время</text>
+
+          <line x1="175" y1="150" x2="175" y2="182" style="stroke:var(--want);stroke-width:1.5"/>
+          <circle cx="175" cy="182" r="4" style="fill:var(--want)"/>
+          <text class="svg-label" x="175" y="212" text-anchor="middle" style="fill:var(--want)">Замер 1</text>
+          <text class="svg-small" x="175" y="232" text-anchor="middle" style="fill:var(--ink-soft)">«насколько сейчас хочется»</text>
+
+          <line x1="437" y1="150" x2="437" y2="182" style="stroke:var(--like);stroke-width:1.5"/>
+          <circle cx="437" cy="182" r="4" style="fill:var(--like)"/>
+          <text class="svg-label" x="437" y="212" text-anchor="middle" style="fill:var(--like)">Замер 2</text>
+          <text class="svg-small" x="437" y="232" text-anchor="middle" style="fill:var(--ink-soft)">«насколько сейчас приятно»</text>
+
+          <line x1="712" y1="150" x2="712" y2="182" style="stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 3"/>
+          <circle cx="712" cy="182" r="4" style="fill:var(--ground);stroke:var(--muted)"/>
+          <text class="svg-small" x="712" y="212" text-anchor="middle" style="fill:var(--muted)">изнутри не видно —</text>
+          <text class="svg-small" x="712" y="230" text-anchor="middle" style="fill:var(--muted)">проявится только в следующем «хочу»</text>
+        </svg>
+      </div>
+      <figcaption>Два замера снизу — это ровно то, что вы будете собирать в домашнем задании. Третье событие самоотчётом не поймать: обучение не ощущается как отдельное переживание.</figcaption>
+    </figure>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Правило номер один</div>
+      <h2>Дофамин двигает, а не радует</h2>
+    </div>
+
+    <div class="note-row">
+      <p>Полвека назад считалось, что дофамин — это вещество удовольствия. Что он и есть радость. Это называлось <em>гипотезой ангедонии</em>: убери дофамин — и ничто не будет приятно.</p>
+      <aside class="note">Anhedonia hypothesis. Выдвинута в 1970-х Роем Уайзом.</aside>
+    </div>
+
+    <p>Она не «уточнена». Она опровергнута. Причём с двух сторон: дофамин убирали — и дофамин добавляли.</p>
+
+    <div class="evidence wide">
+
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Убрали почти весь дофамин у крыс — «вкусно» осталось на месте</div>
+          <span class="chip chip--like">Прибор: нравиться</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Стереотипные движения морды в ответ на каплю раствора во рту. Ритмичные высовывания языка — «вкусно». Гримасы и отряхивание лап — «противно». Считали, сколько таких движений за пробу. Это не мнение, это подсчёт движений.</dd>
+          <dt>На ком</dt>
+          <dd>Крысы. Дофамин в прилежащем ядре и полосатом теле разрушен нейротоксином — <b>до 99&nbsp;% от нормы</b>.</dd>
+          <dt>Масштаб времени</dt>
+          <dd>Секунды после капли; наблюдение неделями после операции.</dd>
+          <dt>Воспроизвели</dt>
+          <dd>Да, многократно и разными способами. В более ранней работе тех же авторов (1989) крысы после разрушения дофаминовой системы вообще переставали есть сами — а реакция «вкусно» оставалась «практически неизменной».</dd>
+        </dl>
+        <div class="src">Berridge &amp; Robinson, 1998, Brain Research Reviews 28:309–369 · Berridge, Venier &amp; Robinson, 1989, Behavioral Neuroscience 103:36–45</div>
+      </div>
+
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Люди с болезнью Паркинсона оценивают сладкое как приятное — нормально</div>
+          <span class="chip chip--like">Прибор: нравиться</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Оценки интенсивности и приятности вкуса. Бумажные кружочки, пропитанные раствором сахара (10–60&nbsp;%), хинина, лимонной кислоты, соли. Плюс 100 мл шоколадного и ванильного молока.</dd>
+          <dt>На ком</dt>
+          <dd>30 пациентов с болезнью Паркинсона и 33 человека контрольной группы. При Паркинсоне дофаминовые клетки гибнут массово.</dd>
+          <dt>Масштаб времени</dt>
+          <dd>Один лабораторный сеанс.</dd>
+          <dt>Воспроизвели</dt>
+          <dd>Это одно исследование. Оно поддерживающее, а не решающее — см. оговорку ниже.</dd>
+        </dl>
+        <div class="src">Sienkiewicz-Jarosz et al., 2005, J Neurol Neurosurg Psychiatry 76:40–46</div>
+      </div>
+
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Приглушили дофамин у здоровых людей — усилие упало, улыбка от еды осталась</div>
+          <span class="chip chip--want">Прибор: хотеть</span>
+          <span class="chip chip--like">Прибор: нравиться</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Три разные вещи сразу. <b>Усилие:</b> с какой силой человек сжимает динамометр, чтобы получить награду. <b>Мышцы лица:</b> датчики на мышце улыбки и мышце нахмуривания. <b>Слова:</b> оценки «насколько хочу» и «насколько понравилось» на шкале от −10 до +10.</dd>
+          <dt>На ком</dt>
+          <dd>131 здоровый доброволец. Три группы вслепую: блокатор дофамина (амисульприд, 400 мг), блокатор опиоидов (налтрексон, 50 мг), пустышка.</dd>
+          <dt>Масштаб времени</dt>
+          <dd>Один сеанс, действие препарата — часы.</dd>
+          <dt>Воспроизвели</dt>
+          <dd>Отдельной репликации этой работы я не нашёл. Но её результат ложится в ту же картину, что и опыты на животных.</dd>
+        </dl>
+        <div class="src">Korb et al., 2020, eLife 9:e55797</div>
+      </div>
+
+    </div>
+
+    <div class="note-row">
+      <p>Последнее исследование интереснее, чем кажется, и стоит того, чтобы задержаться. Оба препарата снизили физическое усилие — люди хуже жали динамометр за награду. Но во время самого потребления разошлись: <strong>улыбку на вкусную еду приглушил блокатор опиоидов, а не блокатор дофамина.</strong> Ровно то, что предсказывает разделение на Охотника и Дегустатора.</p>
+      <aside class="note">Мышца улыбки — zygomaticus major. Мышца нахмуривания — corrugator supercilii. Метод: лицевая электромиография.</aside>
+    </div>
+
+    <p>И честная неприятность в той же работе: <strong>словесные оценки не изменились ни от одного препарата.</strong> Ни «хочу», ни «понравилось». Двигались только объективные показатели — сила сжатия и мышцы лица.</p>
+
+    <p>Вывод отсюда неудобный, но важный для нас: <strong>спрашивать человека «насколько тебе хочется» — самый слабый прибор из всех.</strong> Он ловит не то же самое, что усилие. Мы будем им пользоваться в домашних заданиях, потому что другого у нас нет, — но с этой поправкой в голове.</p>
+
+    <div class="evidence wide">
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">С другой стороны: добавили дофамина мышам — «вкусно» не выросло</div>
+          <span class="chip chip--want">Прибор: хотеть</span>
+          <span class="chip chip--like">Прибор: нравиться</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd><b>Тяга:</b> поведение в коридоре за сладким — как быстро выбегают, сколько проб нужно, чтобы выучить, часто ли останавливаются, отвлекаются ли. <b>Удовольствие:</b> те же движения морды на вкус сахара.</dd>
+          <dt>На ком</dt>
+          <dd>Мыши с генетической поломкой: переносчик дофамина работает на 10&nbsp;% от нормы, из-за чего дофамина в синапсах на 70&nbsp;% больше обычного.</dd>
+          <dt>Масштаб времени</dt>
+          <dd>Пожизненно повышенный дофамин, серии проб.</dd>
+          <dt>Что вышло</dt>
+          <dd>Тяга выросла отчётливо: выбегают быстрее, учатся быстрее, меньше отвлекаются. Удовольствие — нет. На самом сладком растворе реакций «вкусно» было даже <em>меньше</em>, чем у обычных мышей.</dd>
+        </dl>
+        <div class="src">Peciña, Cagniard, Berridge, Aldridge &amp; Zhuang, 2003, Journal of Neuroscience 23:9395–9402</div>
+      </div>
+    </div>
+
+    <div class="callout wide">
+      <div class="lead">Убираем дофамин — «нравится» остаётся. Добавляем — «нравится» не растёт.</div>
+      <p>Двигать перестаёт. Радоваться не перестаёт. Это и есть содержание правила «дофамин двигает, а не радует».</p>
+    </div>
+
+    <p><strong>Где кончается это знание — три оговорки, которые я обязан назвать.</strong></p>
+
+    <p><b>Первая.</b> Про Паркинсона: почти все такие пациенты принимают дофаминовые лекарства, и из описания метода не видно, тестировали ли их без препаратов. Поэтому это исследование — поддержка, а не доказательство. Решающие данные — животные, где дофамин убирают полностью и контролируемо.</p>
+
+    <p><b>Вторая.</b> «Движения морды» у крысы и «мне вкусно» у человека — не одно и то же. Это хороший, воспроизводимый прибор, но он меряет реакцию, а не переживание. Строго говоря, мы не знаем, что чувствует крыса.</p>
+
+    <div class="note-row">
+      <p><b>Третья.</b> Про строку «учиться» есть настоящий научный спор. Одна школа считает обучение на ошибке предсказания главной работой дофамина. Другая — та самая, чьи опыты выше — показывает, что часть обучения идёт и без дофамина, и главное в нём всё-таки тяга. Обе стороны согласны в одном: удовольствие делает не дофамин. Разбираться в этом споре будем отдельным уроком.</p>
+      <aside class="note">Стороны спора: reward prediction error (Шульц, Дайан) против incentive salience (Берридж, Робинсон).</aside>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Тогда кто</div>
+      <h2>Дегустатор помещается в горошину</h2>
+    </div>
+
+    <p>Если удовольствие делает не дофамин — то что? Ответ оказался неожиданно точечным.</p>
+
+    <div class="note-row">
+      <p>В оболочке прилежащего ядра нашли крошечный участок примерно <strong>в один кубический миллиметр</strong>. Если ввести туда вещество, похожее на собственный опиоид мозга, реакции «вкусно» на сахар вырастают <strong>минимум вдвое</strong>. Сахар тот же. Вкуснее стало от укола.</p>
+      <aside class="note">Ростродорсальный квадрант медиальной оболочки прилежащего ядра. Агонисты мю-, дельта- и каппа-опиоидных рецепторов дают один и тот же эффект.</aside>
+    </div>
+
+    <p>Дальше начинается самое красивое. Тот же самый укол в других местах даёт совсем другие результаты.</p>
+
+    <figure class="wide">
+      <div class="figbox">
+        <svg viewBox="0 0 900 300" role="img" aria-label="Схема: укол опиоида в горячую точку удваивает реакции удовольствия, в заднюю половину оболочки — вдвое уменьшает, а почти в любой точке увеличивает количество съеденного">
+          <ellipse cx="250" cy="150" rx="200" ry="92" style="fill:var(--surface-2);stroke:var(--rule)"/>
+
+          <rect x="115" y="96" width="56" height="42" rx="3" style="fill:var(--like-bg);stroke:var(--like);stroke-width:1.5"/>
+          <text class="svg-label" x="143" y="88" text-anchor="middle" style="fill:var(--like)">1 мм³</text>
+
+          <rect x="298" y="152" width="76" height="48" rx="3" style="fill:var(--value-bg);stroke:var(--value);stroke-width:1.5;stroke-dasharray:4 3"/>
+
+          <circle cx="212" cy="196" r="5" style="fill:var(--muted)"/>
+
+          <text class="svg-label" x="250" y="264" text-anchor="middle" style="fill:var(--muted)">Оболочка прилежащего ядра · схема, не анатомия</text>
+
+          <path d="M171 112 C 300 100, 400 80, 516 78" style="fill:none;stroke:var(--like);stroke-width:1.5"/>
+          <path d="M516 72 L530 78 L516 84 Z" style="fill:var(--like)"/>
+          <rect x="534" y="48" width="340" height="62" rx="3" style="fill:var(--like-bg);stroke:var(--like)"/>
+          <text class="svg-name" x="552" y="74" style="fill:var(--like)">«Вкусно» вдвое больше</text>
+          <text class="svg-small" x="552" y="95" style="fill:var(--ink-soft)">Укол внутрь точки. Сахар тот же.</text>
+
+          <path d="M374 176 C 430 176, 470 168, 516 162" style="fill:none;stroke:var(--value);stroke-width:1.5"/>
+          <path d="M516 156 L530 162 L516 168 Z" style="fill:var(--value)"/>
+          <rect x="534" y="132" width="340" height="62" rx="3" style="fill:var(--value-bg);stroke:var(--value)"/>
+          <text class="svg-name" x="552" y="158" style="fill:var(--value)">«Вкусно» вдвое меньше</text>
+          <text class="svg-small" x="552" y="179" style="fill:var(--ink-soft)">Тот же укол в заднюю половину.</text>
+
+          <path d="M217 200 C 340 235, 430 245, 516 246" style="fill:none;stroke:var(--want);stroke-width:1.5;stroke-dasharray:5 4"/>
+          <path d="M516 240 L530 246 L516 252 Z" style="fill:var(--want)"/>
+          <rect x="534" y="216" width="340" height="62" rx="3" style="fill:var(--want-bg);stroke:var(--want)"/>
+          <text class="svg-name" x="552" y="242" style="fill:var(--want)">Ест больше, вкуснее не стало</text>
+          <text class="svg-small" x="552" y="263" style="fill:var(--ink-soft)">Почти любая другая точка оболочки.</text>
+        </svg>
+      </div>
+      <figcaption>Один и тот же укол. Сдвиг на миллиметр меняет результат на противоположный. Пропорции на схеме условные.</figcaption>
+    </figure>
+
+    <p>Бытовая аналогия. Представьте огромный цех. Где-то в нём есть одна маленькая комнатка с кнопкой. Нажмёте кнопку в комнатке — еда становится вкуснее. Нажмёте точно такую же кнопку в любом другом углу цеха — рабочий начинает есть больше, но вкуснее ему не стало. А в дальней половине цеха от той же кнопки еда становится противнее.</p>
+
+    <p>Это и есть главная мысль урока в анатомии. Тяга разлита по большой системе. Удовольствие сидит в горошине.</p>
+
+    <p><strong>Граница.</strong> Всё это — карта крысиного мозга, построенная уколами в конкретные координаты. У человека такую карту прямыми измерениями не строили и, по понятным причинам, вряд ли построят. Косвенные данные у людей есть, но точные границы человеческих горячих точек мы не знаем.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Ловушка, на которой ошибаются чаще всего</div>
+      <h2>Настроение — это отчёт Охотника, а не Дегустатора</h2>
+    </div>
+
+    <p>Есть известная работа, которую пересказывают неправильно примерно всегда. Разберём её как образец.</p>
+
+    <div class="evidence wide">
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Сиюминутное «насколько я счастлив» объясняется не выигрышем, а разницей с ожиданием</div>
+          <span class="chip chip--mood">Прибор: настроение</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Один вопрос — «насколько ты счастлив прямо сейчас» — на ползунке, каждые несколько ходов игры на деньги.</dd>
+          <dt>На ком</dt>
+          <dd>26 человек в томографе и 18&nbsp;420 человек через приложение в телефоне.</dd>
+          <dt>Масштаб времени</dt>
+          <dd>Секунды и минуты. Внутри одной игровой сессии.</dd>
+          <dt>Воспроизвели</dt>
+          <dd>Да. Независимая предзарегистрированная репликация в основном подтвердила результат. А более поздняя работа уточнила его резко: настроение оказалось чувствительно к тому, насколько исход <em>удивил</em>, и почти не чувствительно к тому, насколько он был денежно выгоднее ожидаемого.</dd>
+        </dl>
+        <div class="src">Rutledge, Skandali, Dayan &amp; Dolan, 2014, PNAS 111:12252–12257 · независимая репликация — Vanhasbroeck et al., 2021, Cognition and Emotion 35:822–835 · уточнение — Blain &amp; Rutledge, 2020, eLife 9:e57977</div>
+      </div>
+    </div>
+
+    <p>Как этот результат пересказывают: «счастье зависит не от того, сколько ты получил, а от того, насколько это превзошло ожидания».</p>
+
+    <p>Как надо: <strong>ответ на вопрос «насколько я счастлив сейчас», в игре на деньги, в масштабе секунд, хорошо предсказывается недавними расхождениями с ожиданием.</strong></p>
+
+    <div class="note-row">
+      <p>Разница огромна. Прибор здесь — <span class="chip chip--mood">Настроение</span>. Это словесная сводка. И она в основном пересказывает работу Охотника, потому что в лабораторной игре на деньги Дегустатору попросту нечего делать: денежный выигрыш никто не пробует на язык.</p>
+      <aside class="note">Именно на этой подмене сорвалась предыдущая попытка построить вам курс. Вывод про настроение подали как вывод про удовольствие вообще.</aside>
+    </div>
+
+    <p>Что из этого <em>не</em> следует: что вкусная еда не вкуснее невкусной. Что удовольствие вообще устроено как «разница с ожиданием». Что размер награды не важен для удовольствия.</p>
+
+    <p>Ни одного из этих утверждений эксперимент не проверял. Он мерил другим прибором.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Обязательный раздел каждого урока</div>
+      <h2>Что известно точно, а что я придумал</h2>
+    </div>
+
+    <div class="split wide">
+      <div class="panel panel--know">
+        <div class="stamp">Знаем</div>
+        <ul>
+          <li>Убрать дофамин почти полностью — реакции «вкусно» остаются. Воспроизведено многими лабораториями и разными методами.</li>
+          <li>Добавить дофамина — тяга растёт, «вкусно» не растёт.</li>
+          <li>Есть участок около кубического миллиметра, где опиоидный укол минимум удваивает реакции «вкусно», а рядом есть участок, где тот же укол их вдвое уменьшает.</li>
+          <li>У людей блокатор опиоидов приглушает улыбку на вкусную еду, а блокатор дофамина — нет; при этом оба снижают физическое усилие за награду.</li>
+          <li>Словесные оценки «хочу» и «понравилось» в том эксперименте не сдвинул ни один препарат.</li>
+        </ul>
+      </div>
+
+      <div class="panel panel--made">
+        <div class="stamp">Придумал</div>
+        <ul>
+          <li>Три работника. Это упаковка для запоминания, а не анатомический факт. В настоящем мозге одни и те же структуры участвуют в нескольких ролях, а границы размыты.</li>
+          <li>«Дегустатор размером с горошину». Кубический миллиметр — это про крысу. Человеческий размер отсюда не следует.</li>
+          <li>Приписывание Охотнику двух работ сразу — тяги и обучения. Это удобное для нас объединение; в науке о том, одна это работа или две, идёт спор.</li>
+          <li>Ресторан, собака у ларька, цех с кнопкой — мои аналогии. Они помогают запомнить и ничего не доказывают.</li>
+        </ul>
+      </div>
+
+      <div class="panel panel--hole">
+        <div class="stamp">Дыра в данных</div>
+        <ul>
+          <li>Где именно у человека находятся горячие точки и какого они размера — прямыми измерениями не установлено.</li>
+          <li>Насколько словесный самоотчёт «хочется на 7 из 10» соответствует тому, что меряют усилием, — толком неизвестно. Данные выше говорят, что соответствие плохое.</li>
+          <li>Что на самом деле переживает крыса, высовывая язык, — вопрос за пределами метода.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Не строим на этом</div>
+      <h2>Развенчанное</h2>
+    </div>
+
+    <p>Это не «спорное». Это проверенное и не подтвердившееся. Встретите в интернете — можно смело не тратить время.</p>
+
+    <div class="debunk wide">
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Дофамин — гормон счастья»</div>
+          <div class="why">Весь этот урок про то, почему нет. Плюс дофамин — не гормон в этой роли, а нейромедиатор: он работает в синапсе между клетками, а не разносится кровью по телу.</div>
+        </div>
+      </div>
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Дофаминовый детокс», «дофаминовое голодание», «перезагрузка дофамина»</div>
+          <div class="why">Придумано в кругу калифорнийских стартаперов около 2019 года, научного основания не имело никогда. Дофаминовая система не резервуар, её нельзя опустошить и наполнить воздержанием. Отдых от телефона может быть полезен по совершенно другим причинам — но объяснение неверное, а значит и рецепты из него ненадёжны.</div>
+        </div>
+      </div>
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Сила воли — исчерпаемый ресурс»</div>
+          <div class="why">Гипотеза истощения эго. Проверена согласованно: 23 лаборатории, 2141 участник, заранее зарегистрированный протокол. Величина эффекта 0,04 при доверительном интервале от −0,07 до 0,15 — то есть ноль внутри интервала. Разбирать подробно будем в уроке про усилие.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="hw wide">
+    <div class="eyebrow">Домашнее задание</div>
+    <h2>Поймать расхождение между «хочется» и «приятно»</h2>
+
+    <p>Смысл задания — не в среднем значении, а в <strong>разрыве</strong>. Мы ищем случаи, где Охотник тянул на девятку, а Дегустатор поставил четвёрку. Если разрыв найдётся — метафора трёх работников перестанет быть чужой теорией и станет вашим наблюдением.</p>
+
+    <ol>
+      <li><div>Пять дней подряд. Минимум три записи в день.</div></li>
+      <li><div>Ловите момент, когда собираетесь сделать что-то приятное. Что угодно: еда, сериал, лента в телефоне, покупка, сигарета, музыка.</div></li>
+      <li><div><b>Замер 1 — за минуту до начала.</b> Одна цифра от 0 до 10: насколько сейчас хочется. Записать до того, как начали.</div></li>
+      <li><div><b>Замер 2 — на середине, не после.</b> Одна цифра от 0 до 10: насколько прямо сейчас приятно. Не «понравилось ли в целом» — а как ощущается в эту секунду.</div></li>
+      <li><div>Рядом одна строчка: что это было и во сколько.</div></li>
+    </ol>
+
+    <p>Формат: что угодно, где можно писать быстро. Заметки в телефоне подойдут. Строка вида <span style="font-family:var(--mono);font-size:.86em">19:40 · лента · хочется 8 · приятно 3</span> — это всё, что нужно.</p>
+
+    <p class="warn"><b>Честно о слабости этого прибора.</b> Самоотчёт — самый слабый инструмент из всех, что были в уроке. Он не меряет ни дофамин, ни опиоиды. Он меряет то, что вы способны заметить и назвать словом. Мы только что видели: в эксперименте на 131 человеке именно словесные оценки не сдвинулись ни от одного препарата, хотя объективные показатели сдвинулись. Так что это черновик, а не истина. Мы будем сравнивать ваши записи между собой, а не с нормой — и в этом виде они уже полезны.</p>
+
+    <p class="warn"><b>Два правила, без которых данные испортятся.</b> Первое: обе цифры ставить в моменте, а не вечером по памяти. Память переписывает прошлое под то, чем всё кончилось. Второе: не пытайтесь ставить «правильные» цифры. Если хочется на 9, а приятно на 2 — это самая ценная запись из всех, не сглаживайте её.</p>
+  </section>
+
+  <section class="takeaway wide">
+    <div class="eyebrow">Что запомнить</div>
+    <ol>
+      <li>
+        <div>
+          <div class="big">Дофамин двигает, а не радует.</div>
+          <div class="sub">Убрали почти весь — «вкусно» осталось. Добавили — «вкусно» не выросло. Удовольствие делают опиоиды и эндоканнабиноиды в крошечных участках.</div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="big">«Награда» — слово-обманка, за ним прячутся четыре разные вещи.</div>
+          <div class="sub">Хотеть, нравиться, учиться, настроение. У каждой свой измерительный прибор. Ответ, полученный одним прибором, нельзя переносить на другой.</div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="big">Хочется и нравится умеют расходиться — и это можно поймать у себя.</div>
+          <div class="sub">Два замера: «насколько хочется» до и «насколько приятно» в момент. Разрыв между ними — главный материал следующего урока.</div>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="sources wide">
+    <div class="eyebrow">Источники — можно проверять</div>
+    <ol>
+      <li>Berridge KC, Robinson TE. What is the role of dopamine in reward: hedonic impact, reward learning, or incentive salience? <i>Brain Research Reviews</i>, 1998;28(3):309–369. <a href="https://pubmed.ncbi.nlm.nih.gov/9858756/">PMID 9858756</a></li>
+      <li>Berridge KC, Venier IL, Robinson TE. Taste reactivity analysis of 6-hydroxydopamine-induced aphagia. <i>Behavioral Neuroscience</i>, 1989;103(1):36–45. <a href="https://pubmed.ncbi.nlm.nih.gov/2493791/">PMID 2493791</a></li>
+      <li>Sienkiewicz-Jarosz H et al. Taste responses in patients with Parkinson's disease. <i>J Neurol Neurosurg Psychiatry</i>, 2005;76(1):40–46. <a href="https://pubmed.ncbi.nlm.nih.gov/15607993/">PMID 15607993</a></li>
+      <li>Korb S et al. Dopaminergic and opioidergic regulation during anticipation and consumption of social and nonsocial rewards. <i>eLife</i>, 2020;9:e55797. <a href="https://elifesciences.org/articles/55797">elifesciences.org/articles/55797</a></li>
+      <li>Peciña S, Cagniard B, Berridge KC, Aldridge JW, Zhuang X. Hyperdopaminergic mutant mice have higher "wanting" but not "liking" for sweet rewards. <i>J Neurosci</i>, 2003;23(28):9395–9402. <a href="https://pubmed.ncbi.nlm.nih.gov/14561867/">PMID 14561867</a></li>
+      <li>Castro DC, Berridge KC. Opioid hedonic hotspot in nucleus accumbens shell. <i>J Neurosci</i>, 2014;34(12):4239–4250. <a href="https://pubmed.ncbi.nlm.nih.gov/24647944/">PMID 24647944</a></li>
+      <li>Peciña S, Berridge KC. Hedonic hot spot in nucleus accumbens shell: where do mu-opioids cause increased hedonic impact of sweetness? <i>J Neurosci</i>, 2005;25(50):11777–11786. <a href="https://pubmed.ncbi.nlm.nih.gov/16354936/">PMID 16354936</a></li>
+      <li>Rutledge RB, Skandali N, Dayan P, Dolan RJ. A computational and neural model of momentary subjective well-being. <i>PNAS</i>, 2014;111(33):12252–12257. <a href="https://www.pnas.org/doi/10.1073/pnas.1407535111">10.1073/pnas.1407535111</a></li>
+      <li>Vanhasbroeck N et al. Testing a computational model of subjective well-being: a preregistered replication of Rutledge et al. (2014). <i>Cognition and Emotion</i>, 2021;35(4):822–835. <a href="https://pubmed.ncbi.nlm.nih.gov/33632071/">PMID 33632071</a></li>
+      <li>Blain B, Rutledge RB. Momentary subjective well-being depends on learning and not reward. <i>eLife</i>, 2020;9:e57977. <a href="https://elifesciences.org/articles/57977">elifesciences.org/articles/57977</a></li>
+      <li>Hagger MS et al. A multilab preregistered replication of the ego-depletion effect. <i>Perspectives on Psychological Science</i>, 2016;11(4):546–573. <a href="https://pubmed.ncbi.nlm.nih.gov/27474142/">PMID 27474142</a></li>
+    </ol>
+  </section>
+
+</article>
+</body>
+</html>
