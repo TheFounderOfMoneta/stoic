@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Хочу больше, нравится так же</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --ground:#EFF1F3;
+  --surface:#FBFCFD;
+  --surface-2:#E7EAEE;
+  --ink:#15181C;
+  --ink-soft:#3A424C;
+  --muted:#5E6672;
+  --rule:#D3D8DE;
+  --rule-soft:#E1E5EA;
+
+  --want:#A8471B;
+  --learn:#7E5A0E;
+  --like:#8C2D5E;
+  --mood:#454A78;
+  --value:#1B5C68;
+  --alarm:#96182B;
+
+  --want-bg:#F6E7DE;
+  --learn-bg:#F4EDD9;
+  --like-bg:#F6E3EC;
+  --mood-bg:#E5E7F4;
+  --value-bg:#DDECEE;
+  --alarm-bg:#F7E2E4;
+
+  --measure:35rem;
+  --aside:14rem;
+  --sans:"IBM Plex Sans","Segoe UI",Roboto,Arial,sans-serif;
+  --serif:"Literata","Georgia",serif;
+  --mono:"IBM Plex Mono","SF Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F1216;
+    --surface:#171B21;
+    --surface-2:#20252C;
+    --ink:#E6E9ED;
+    --ink-soft:#C4CBD3;
+    --muted:#959EAA;
+    --rule:#2C323A;
+    --rule-soft:#242A31;
+
+    --want:#E08A55;
+    --learn:#D0AC55;
+    --like:#E183B2;
+    --mood:#9AA1DE;
+    --value:#5FB2C0;
+    --alarm:#EC8792;
+
+    --want-bg:#2C1D14;
+    --learn-bg:#292214;
+    --like-bg:#2B1721;
+    --mood-bg:#1C1E30;
+    --value-bg:#132428;
+    --alarm-bg:#2C1519;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F1216;
+  --surface:#171B21;
+  --surface-2:#20252C;
+  --ink:#E6E9ED;
+  --ink-soft:#C4CBD3;
+  --muted:#959EAA;
+  --rule:#2C323A;
+  --rule-soft:#242A31;
+
+  --want:#E08A55;
+  --learn:#D0AC55;
+  --like:#E183B2;
+  --mood:#9AA1DE;
+  --value:#5FB2C0;
+  --alarm:#EC8792;
+
+  --want-bg:#2C1D14;
+  --learn-bg:#292214;
+  --like-bg:#2B1721;
+  --mood-bg:#1C1E30;
+  --value-bg:#132428;
+  --alarm-bg:#2C1519;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:17px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--surface-2)}
+:focus-visible{outline:2px solid var(--want);outline-offset:3px;border-radius:2px}
+
+.lesson{width:min(100% - 2.25rem,51rem);margin-inline:auto;padding:0 0 5rem;display:flex;flex-direction:column;gap:1.15rem}
+.lesson > *{max-width:var(--measure)}
+.lesson > .wide{max-width:none}
+
+p{margin:0}
+h1,h2,h3{margin:0;font-family:var(--serif);text-wrap:balance;font-weight:600}
+strong{font-weight:600}
+em{font-style:italic}
+a{color:inherit;text-decoration-color:var(--rule);text-underline-offset:3px}
+a:hover{text-decoration-color:currentColor}
+
+/* ---------- header ---------- */
+.masthead{max-width:none;border-bottom:1px solid var(--rule);padding:3.2rem 0 1.9rem;margin-bottom:1.4rem;display:flex;flex-direction:column;gap:1.1rem}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:clamp(2.05rem,6vw,3.05rem);line-height:1.08;letter-spacing:-.015em;max-width:16ch}
+.dek{max-width:var(--measure);color:var(--ink-soft);font-size:1.06rem}
+
+/* ---------- section heads ---------- */
+.sec{max-width:none;margin-top:2.9rem;display:flex;flex-direction:column;gap:1.15rem}
+.sec > *{max-width:var(--measure)}
+.sec > .wide{max-width:none}
+.sec-head{display:flex;flex-direction:column;gap:.3rem;max-width:var(--measure)}
+.sec-head .eyebrow{color:var(--muted)}
+h2{font-size:1.62rem;line-height:1.2;letter-spacing:-.01em}
+h3{font-family:var(--sans);font-size:1rem;font-weight:600;letter-spacing:.005em}
+
+/* ---------- three sentences ---------- */
+.thesis{max-width:none;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.5rem 1.6rem;display:flex;flex-direction:column;gap:.85rem}
+.thesis .eyebrow{margin-bottom:.15rem}
+.thesis ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.85rem;counter-reset:t}
+.thesis li{counter-increment:t;display:grid;grid-template-columns:1.6rem minmax(0,1fr);gap:.65rem;max-width:var(--measure)}
+.thesis li > *{grid-column:2}
+.thesis li::before{content:counter(t);font-family:var(--mono);font-size:.82rem;color:var(--muted);padding-top:.28rem}
+
+/* ---------- margin notes ---------- */
+.note-row{max-width:none;display:grid;grid-template-columns:minmax(0,var(--measure)) minmax(0,var(--aside));gap:1.75rem;align-items:start}
+.note{font-family:var(--mono);font-size:.74rem;line-height:1.5;color:var(--muted);border-left:2px solid var(--rule);padding-left:.7rem}
+@media (max-width:62rem){
+  .note-row{grid-template-columns:1fr;gap:.7rem}
+  .note{max-width:var(--measure)}
+}
+
+/* ---------- chips ---------- */
+.chip{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;padding:.14em .5em;border-radius:2px;white-space:nowrap;vertical-align:.08em}
+.chip--want{background:var(--want-bg);color:var(--want)}
+.chip--learn{background:var(--learn-bg);color:var(--learn)}
+.chip--like{background:var(--like-bg);color:var(--like)}
+.chip--mood{background:var(--mood-bg);color:var(--mood)}
+.chip--value{background:var(--value-bg);color:var(--value)}
+
+/* ---------- worker cards ---------- */
+.workers{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}
+.worker{background:var(--surface);border:1px solid var(--rule);border-top:3px solid var(--wc);border-radius:3px;padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.6rem}
+.worker--want{--wc:var(--want)}
+.worker--like{--wc:var(--like)}
+.worker--value{--wc:var(--value)}
+.worker h3{font-family:var(--mono);font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--wc)}
+.worker .role{font-family:var(--serif);font-size:1.22rem;line-height:1.25;font-weight:600}
+.worker p{font-size:.94rem;color:var(--ink-soft)}
+.worker .tag{font-family:var(--mono);font-size:.71rem;line-height:1.45;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem;margin-top:.15rem}
+
+/* ---------- callout ---------- */
+.callout{max-width:none;background:var(--surface-2);border-radius:3px;padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:.7rem}
+.callout .lead{font-family:var(--serif);font-size:1.3rem;line-height:1.3;font-weight:600;max-width:26ch}
+.callout p{max-width:var(--measure);color:var(--ink-soft);font-size:.97rem}
+
+/* ---------- evidence cards ---------- */
+.evidence{max-width:none;display:flex;flex-direction:column;gap:.85rem}
+.ev{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.15rem 1.25rem;display:flex;flex-direction:column;gap:.9rem}
+.ev-top{display:flex;flex-wrap:wrap;gap:.5rem .7rem;align-items:baseline}
+.ev-top .claim{font-family:var(--serif);font-size:1.12rem;font-weight:600;line-height:1.3;flex:1 1 18rem;min-width:0}
+.ev dl{margin:0;display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:.42rem 1rem;font-size:.9rem}
+.ev dt{font-family:var(--mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding-top:.25rem}
+.ev dd{margin:0;color:var(--ink-soft)}
+.ev .src{font-family:var(--mono);font-size:.71rem;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem}
+@media (max-width:38rem){
+  .ev dl{grid-template-columns:1fr;gap:.15rem}
+  .ev dd{margin-bottom:.5rem}
+}
+
+/* ---------- table ---------- */
+.tablewrap{max-width:none;overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:44rem;font-size:.9rem}
+th,td{text-align:left;padding:.75rem .9rem;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td:first-child{white-space:nowrap}
+td .sysname{font-family:var(--mono);font-size:.74rem;letter-spacing:.07em;text-transform:uppercase}
+.r-want .sysname{color:var(--want)}
+.r-like .sysname{color:var(--like)}
+.r-learn .sysname{color:var(--learn)}
+.r-mood .sysname{color:var(--mood)}
+
+/* ---------- figures ---------- */
+figure{margin:0;max-width:none;display:flex;flex-direction:column;gap:.7rem}
+.figbox{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.35rem 1.2rem}
+.figbox svg{display:block;min-width:32rem;width:100%;height:auto}
+figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(--muted);max-width:var(--measure)}
+.svg-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase}
+.svg-name{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+.svg-body{font-family:var(--sans);font-size:12.5px}
+.svg-small{font-family:var(--sans);font-size:11.5px}
+
+/* ---------- know / invented ---------- */
+.split{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem}
+.panel{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.7rem}
+.panel .stamp{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;padding:.2em .55em;border-radius:2px;align-self:flex-start}
+.panel--know .stamp{background:var(--value-bg);color:var(--value)}
+.panel--made .stamp{background:var(--learn-bg);color:var(--learn)}
+.panel--hole .stamp{background:var(--alarm-bg);color:var(--alarm)}
+.panel ul{margin:0;padding-left:1.05rem;display:flex;flex-direction:column;gap:.55rem;font-size:.93rem;color:var(--ink-soft)}
+.panel li::marker{color:var(--muted)}
+
+/* ---------- debunked ---------- */
+.debunk{max-width:none;display:flex;flex-direction:column;gap:.7rem}
+.dbk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.9rem;align-items:start;border-left:3px solid var(--alarm);background:var(--surface);padding:.9rem 1.1rem;border-radius:0 3px 3px 0}
+.dbk .x{font-family:var(--mono);color:var(--alarm);font-size:.95rem;padding-top:.05rem}
+.dbk .what{font-weight:600;font-size:.96rem}
+.dbk .why{font-size:.9rem;color:var(--ink-soft);margin-top:.2rem}
+
+/* ---------- homework ---------- */
+.hw{max-width:none;border:1px solid var(--want);border-radius:3px;background:var(--surface);padding:1.5rem 1.55rem;display:flex;flex-direction:column;gap:1.1rem}
+.hw .eyebrow{color:var(--want)}
+.hw h2{font-size:1.35rem}
+.hw ol{margin:0;padding:0;list-style:none;counter-reset:h;display:flex;flex-direction:column;gap:.9rem}
+.hw ol li{counter-increment:h;display:grid;grid-template-columns:1.9rem 1fr;gap:.6rem;max-width:var(--measure)}
+.hw ol li::before{content:counter(h);font-family:var(--mono);font-size:.74rem;color:var(--want);border:1px solid var(--rule);border-radius:50%;width:1.5rem;height:1.5rem;display:grid;place-items:center;margin-top:.15rem}
+.hw p{max-width:var(--measure);font-size:.95rem;color:var(--ink-soft)}
+.hw .warn{font-size:.9rem;border-top:1px solid var(--rule-soft);padding-top:.85rem;color:var(--ink-soft)}
+.hw .warn b{color:var(--ink)}
+
+/* ---------- takeaways ---------- */
+.takeaway{max-width:none;border-top:2px solid var(--ink);padding-top:1.4rem;display:flex;flex-direction:column;gap:1.1rem}
+.takeaway ol{margin:0;padding:0;list-style:none;counter-reset:k;display:flex;flex-direction:column;gap:1rem}
+.takeaway li{counter-increment:k;display:grid;grid-template-columns:2.2rem 1fr;gap:.7rem;max-width:var(--measure)}
+.takeaway li::before{content:counter(k);font-family:var(--serif);font-size:1.5rem;font-weight:700;color:var(--muted);line-height:1}
+.takeaway .big{font-family:var(--serif);font-size:1.1rem;line-height:1.35;font-weight:600}
+.takeaway .sub{font-size:.93rem;color:var(--ink-soft);margin-top:.15rem}
+
+/* ---------- sources ---------- */
+.sources{max-width:none;margin-top:3rem;border-top:1px solid var(--rule);padding-top:1.3rem;display:flex;flex-direction:column;gap:.75rem}
+.sources ol{margin:0;padding-left:1.3rem;display:flex;flex-direction:column;gap:.6rem;font-family:var(--mono);font-size:.75rem;line-height:1.6;color:var(--muted)}
+.sources li::marker{color:var(--rule)}
+.sources a{color:var(--ink-soft)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.panel--myth .stamp{background:var(--alarm-bg);color:var(--alarm)}
+.panel--real .stamp{background:var(--value-bg);color:var(--value)}
+.figbadge{position:absolute;top:.7rem;right:.8rem;font-family:var(--mono);font-size:.63rem;letter-spacing:.11em;text-transform:uppercase;color:var(--learn);background:var(--learn-bg);padding:.22em .55em;border-radius:2px}
+.figbox{position:relative}
+.svg-tiny{font-family:var(--sans);font-size:10.5px}
+</style>
+</head>
+<body>
+<article class="lesson">
+
+  <header class="masthead">
+    <div class="eyebrow">Курс о мотивации · Урок 2 из 10</div>
+    <h1>Хочу больше, нравится так же</h1>
+    <p class="dek">В первом уроке мы разделили тягу и удовольствие. Теперь главное: они не просто разные — они умеют расходиться в разные стороны. Тяга растёт годами. Удовольствие стоит на месте.</p>
+  </header>
+
+  <section class="thesis">
+    <div class="eyebrow">Весь смысл в трёх предложениях</div>
+    <ol>
+      <li>Вещь-подсказка — запах, значок, время суток, человек — сама начинает тянуть, ещё до того как вы что-то получили.</li>
+      <li>От повторения сила этой подсказки может расти годами, а удовольствие от самой вещи при этом остаётся примерно прежним.</li>
+      <li>Отсюда самое неудобное следствие: «продолжает делать» и «получает удовольствие» — не одно и то же, и одно не доказывает другого.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Новая деталь механизма</div>
+      <h2>Подсказка тянет раньше еды</h2>
+    </div>
+
+    <p>Собака из первого урока тащила вас к ларьку. Но обратите внимание, когда именно она начинает тащить.</p>
+
+    <p>Не когда получила еду. А когда <em>увидела поворот к ларьку</em>.</p>
+
+    <div class="note-row">
+      <p>Это ключевая деталь. Тяга запускается <strong>подсказкой</strong> — любой вещью, которая раньше совпадала с чем-то хорошим. Запах кофе. Значок приложения. Определённое время вечера. Конкретный человек в дверях. Подсказка сама по себе ничего не даёт. Она только сообщает, что что-то может быть.</p>
+      <aside class="note">В литературе такая подсказка — cue. Свойство, которое она приобретает, — incentive salience.</aside>
+    </div>
+
+    <p>И вот что важно: путь от подсказки к тяге <strong>не проходит через удовольствие</strong>. Собаке не нужно ничего пробовать, чтобы натянуть поводок.</p>
+
+    <figure class="wide">
+      <div class="figbox">
+        <svg viewBox="0 0 900 250" role="img" aria-label="Схема: метка запускает тягу, тяга ведёт к действию, действие приводит к удовольствию; обратная стрелка показывает, что метка со временем усиливается, а удовольствие нет">
+          <rect x="40" y="60" width="170" height="66" rx="3" style="fill:var(--surface-2);stroke:var(--rule)"/>
+          <text class="svg-name" x="125" y="88" text-anchor="middle" style="fill:var(--ink-soft)">Подсказка</text>
+          <text class="svg-tiny" x="125" y="108" text-anchor="middle" style="fill:var(--muted)">значок, запах, человек</text>
+
+          <path d="M210 93 L242 93" style="stroke:var(--rule);stroke-width:1.5"/>
+          <path d="M242 87 L256 93 L242 99 Z" style="fill:var(--rule)"/>
+
+          <rect x="256" y="60" width="170" height="66" rx="3" style="fill:var(--want-bg);stroke:var(--want)"/>
+          <text class="svg-name" x="341" y="88" text-anchor="middle" style="fill:var(--want)">Тяга</text>
+          <text class="svg-tiny" x="341" y="108" text-anchor="middle" style="fill:var(--ink-soft)">ещё ничего не получено</text>
+
+          <path d="M426 93 L458 93" style="stroke:var(--rule);stroke-width:1.5"/>
+          <path d="M458 87 L472 93 L458 99 Z" style="fill:var(--rule)"/>
+
+          <rect x="472" y="60" width="150" height="66" rx="3" style="fill:var(--surface-2);stroke:var(--rule)"/>
+          <text class="svg-name" x="547" y="97" text-anchor="middle" style="fill:var(--ink-soft)">Действие</text>
+
+          <path d="M622 93 L654 93" style="stroke:var(--rule);stroke-width:1.5"/>
+          <path d="M654 87 L668 93 L654 99 Z" style="fill:var(--rule)"/>
+
+          <rect x="668" y="60" width="190" height="66" rx="3" style="fill:var(--like-bg);stroke:var(--like)"/>
+          <text class="svg-name" x="763" y="88" text-anchor="middle" style="fill:var(--like)">Удовольствие</text>
+          <text class="svg-tiny" x="763" y="108" text-anchor="middle" style="fill:var(--ink-soft)">только теперь</text>
+
+          <path d="M763 132 C 763 196, 500 200, 125 196 L125 138" style="fill:none;stroke:var(--want);stroke-width:1.5;stroke-dasharray:5 4"/>
+          <path d="M119 138 L125 124 L131 138 Z" style="fill:var(--want)"/>
+          <text class="svg-small" x="452" y="222" text-anchor="middle" style="fill:var(--want)">от повторения подсказка тянет всё сильнее — а рамка справа остаётся прежней</text>
+        </svg>
+      </div>
+      <figcaption>Тяга (вторая рамка) запускается раньше, чем случается что-либо приятное (четвёртая рамка). Поэтому подсказка может тянуть даже тогда, когда в конце вас не ждёт ничего.</figcaption>
+    </figure>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Главное этого урока</div>
+      <h2>Зазывала становится громче, кухня остаётся прежней</h2>
+    </div>
+
+    <p>Представьте ресторан, мимо которого вы ходите годами. У дверей стоит зазывала.</p>
+
+    <p>Каждый год он кричит громче. Машет активнее. Хватает за рукав настойчивее. Через десять лет мимо него пройти уже почти невозможно.</p>
+
+    <p><strong>А кухня всё это время не менялась.</strong> Те же блюда, того же качества. Ужин ровно такой же, как был десять лет назад.</p>
+
+    <div class="note-row">
+      <p>Вот это и есть механизм. От повторения усиливается <em>зазывала</em> — то есть власть подсказки тянуть вас внутрь. Кухня — то есть удовольствие от самой вещи — не усиливается вместе с ним.</p>
+      <aside class="note">Усиление тяги от повторения называется сенситизацией. Это противоположность привыканию: не «приелось», а «стало тянуть сильнее».</aside>
+    </div>
+
+    <p>Итог через годы: вас затаскивает очень громкий зазывала на совершенно обычный ужин.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Осторожно: тут почти все ошибаются</div>
+      <h2>Удовольствие не падает. Это не про выгорание</h2>
+    </div>
+
+    <p>Ходячий пересказ звучит так: «человек втягивается, удовольствие падает до нуля, и он гонится за дозой, которая больше не радует».</p>
+
+    <p>Первая половина верна. Вторая — нет.</p>
+
+    <div class="split wide">
+      <div class="panel panel--myth">
+        <div class="stamp">Ходячая версия</div>
+        <ul>
+          <li>Тяга растёт, потому что удовольствие падает.</li>
+          <li>Человек догоняет ускользающую радость.</li>
+          <li>Значит, если вернуть удовольствие — тяга успокоится.</li>
+        </ul>
+      </div>
+      <div class="panel panel--real">
+        <div class="stamp">Что говорят авторы теории</div>
+        <ul>
+          <li>Тяга растёт сама по себе. Падение удовольствия для этого не требуется.</li>
+          <li>«Нравится» в зависимости, как правило, <b>не снижается</b> — авторы теории подчёркивают, что писали это ещё в 1993 году.</li>
+          <li>В десятилетнем наблюдении у людей, у которых за это время развилась алкогольная зависимость, «хочу» росло, а «нравится» оставалось высоким и ровным.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p>Разница не косметическая. Она меняет то, что вы будете искать в своих записях.</p>
+
+    <p>Если ждать падения удовольствия — вы не найдёте ничего и решите, что механизм к вам не относится. Искать надо <strong>расхождение</strong>: одна линия ползёт вверх, вторая стоит.</p>
+
+    <figure class="wide">
+      <div class="figbox">
+        <div class="figbadge">Форма, а не данные</div>
+        <svg viewBox="0 0 900 300" role="img" aria-label="График формы: линия тяги растёт со временем, линия удовольствия остаётся ровной, разрыв между ними расширяется">
+          <line x1="70" y1="252" x2="836" y2="252" style="stroke:var(--rule);stroke-width:1.5"/>
+          <line x1="70" y1="252" x2="70" y2="52" style="stroke:var(--rule);stroke-width:1.5"/>
+          <text class="svg-label" x="452" y="282" text-anchor="middle" style="fill:var(--muted)">Повторения, месяцы и годы</text>
+          <text class="svg-label" x="70" y="40" text-anchor="middle" style="fill:var(--muted)">Сила</text>
+
+          <path d="M308 153 L422 131 L536 109 L650 90 L760 76 L760 150 L650 147 L536 150 L422 148 L308 151 Z" style="fill:var(--want);opacity:.13"/>
+
+          <polyline points="80,152 194,146 308,151 422,148 536,150 650,147 760,150" style="fill:none;stroke:var(--like);stroke-width:2.5"/>
+          <polyline points="80,192 194,174 308,153 422,131 536,109 650,90 760,76" style="fill:none;stroke:var(--want);stroke-width:2.5"/>
+
+          <text class="svg-name" x="772" y="80" style="fill:var(--want)">Хочу</text>
+          <text class="svg-name" x="772" y="154" style="fill:var(--like)">Нравится</text>
+
+          <text class="svg-small" x="560" y="128" text-anchor="middle" style="fill:var(--want)">разрыв</text>
+        </svg>
+      </div>
+      <figcaption>Это рисунок формы явления, а не чьи-то измерения. Числа, наклон и скорость я выбрал сам, чтобы показать направление. Реальные кривые никто в таком виде не строил.</figcaption>
+    </figure>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Самое сильное доказательство — и оно на людях</div>
+      <h2>Что бывает, когда дофамин добавляют лекарством</h2>
+    </div>
+
+    <p>В первом уроке дофамин добавляли мышам. Мыши сильнее хотели сладкого, но не находили его вкуснее.</p>
+
+    <p>Людям дофамин тоже добавляют — не в эксперименте, а в клинике. При болезни Паркинсона дофаминовых клеток не хватает, и часть лекарств работает так: они прямо включают те приёмники, на которые обычно действует дофамин.</p>
+
+    <div class="note-row">
+      <p>И у части таких пациентов начинается то, чего раньше не было. Азартная игра. Скупка вещей. Резко выросшая сексуальная активность. Приступы переедания.</p>
+      <aside class="note">Класс лекарств: агонисты дофаминовых рецепторов. Самые известные — прамипексол и ропинирол.</aside>
+    </div>
+
+    <div class="evidence wide">
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Лекарство, добавляющее дофамин, увеличивает шанс такого поведения в 2–3,5 раза</div>
+          <span class="chip chip--want">Прибор: хотеть</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Наличие четырёх состояний по стандартным опросникам: проблемная игра, компульсивное сексуальное поведение, компульсивные покупки, приступообразное переедание.</dd>
+          <dt>На ком</dt>
+          <dd>3090 пациентов с болезнью Паркинсона на обычном лечении, 46 центров в США и Канаде. Важная деталь: <b>те, кто оценивал пациентов, не знали, какие лекарства человек принимает.</b></dd>
+          <dt>Что вышло</dt>
+          <dd>Хотя бы одно из четырёх — у 13,6&nbsp;%. Игра 5,0&nbsp;%, покупки 5,7&nbsp;%, переедание 4,3&nbsp;%, сексуальное поведение 3,5&nbsp;%. У принимающих агонист — <b>17,1&nbsp;% против 6,9&nbsp;%</b> у не принимающих. Разница устойчивая, и она одинакова для разных препаратов этого класса — значит дело в классе, а не в конкретной таблетке.</dd>
+          <dt>Масштаб времени</dt>
+          <dd>Срез: всех опросили один раз. Само поведение развивается месяцами.</dd>
+          <dt>Воспроизвели</dt>
+          <dd>Да. Связь подтверждается сводками исследований, а отдельные оценки распространённости в разных выборках доходят и до более высоких цифр.</dd>
+        </dl>
+        <div class="src">Weintraub et al., 2010, Archives of Neurology 67:589–595</div>
+      </div>
+    </div>
+
+    <p><strong>Почему это самый сильный довод в курсе.</strong> Здесь не крыса и не гипотеза. Здесь человеку меняют один параметр — количество дофаминового сигнала — и у части людей появляется мощнейшая тяга к вещам, к которым её раньше не было. А когда лекарство убирают, поведение часто уходит.</p>
+
+    <p>Заметьте, чего в этом описании нет. Нет ни одного сообщения о том, что у этих людей выросла способность <em>наслаждаться</em>. Выросла тяга.</p>
+
+    <div class="note-row">
+      <p>Более того, картина скорее обратная: у пациентов с таким поведением чаще отмечают <em>сниженную</em> способность получать удовольствие. А если резко убрать лекарство, на месте тяги нередко обнаруживается тяжёлая апатия.</p>
+      <aside class="note">Сниженная способность получать удовольствие называется ангедонией. Это связь, найденная в наблюдениях, а не доказанная причина.</aside>
+    </div>
+
+    <p><strong>Три границы, без которых этот довод нельзя брать.</strong></p>
+
+    <p><b>Первая.</b> Исследование — срез, а не наблюдение во времени. Строго говоря, оно показывает связь, а не доказанную причину. Довод в пользу причины — то, что поведение обычно уходит при отмене лекарства. Но качественных исследований именно по отмене мало, и авторы обзоров прямо это признают.</p>
+
+    <p><b>Вторая, и она важная.</b> 13,6&nbsp;% — это меньшинство. У большинства людей на тех же лекарствах ничего подобного не происходит. Значит одного дофамина <strong>недостаточно</strong>. Нужно что-то ещё — какая-то уязвимость, которую мы толком не умеем измерять заранее.</p>
+
+    <p><b>Третья.</b> Это больные люди с уже повреждённой дофаминовой системой. Переносить выводы на здоровый мозг напрямую нельзя.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Как это назвали</div>
+      <h2>Теория, и что в ней до сих пор спорно</h2>
+    </div>
+
+    <p>Из всего этого в 1993 году собрали теорию. Её суть в трёх строчках, без единого термина:</p>
+
+    <div class="callout wide">
+      <div class="lead">Повторение усиливает не удовольствие, а систему тяги. И усиливает надолго.</div>
+      <p>Подсказки, связанные с вещью, набирают власть тянуть. Эта власть может остаться на годы — в том числе после долгого перерыва, когда самой привычки давно нет. Поэтому тяга способна пережить и удовольствие, и разум, и явную цену.</p>
+      <p style="font-family:var(--mono);font-size:.78rem;color:var(--muted)">Название: теория стимульной сенситизации. Robinson &amp; Berridge, 1993.</p>
+    </div>
+
+    <p>Теперь честно про её слабые места. Тридцать лет спустя авторы сами перечислили, что осталось нерешённым.</p>
+
+    <div class="split wide">
+      <div class="panel panel--know">
+        <div class="stamp">Держится хорошо</div>
+        <ul>
+          <li>У людей подсказки продолжают вызывать сильный отклик в глубинных структурах даже спустя десятилетия употребления.</li>
+          <li>Насколько сильно внимание цепляется за подсказку, предсказывает срыв: в одной работе — вероятность возврата к героину в ближайшие три месяца.</li>
+          <li>Приглушение дофамина у людей снижает «хочу», не трогая «нравится».</li>
+        </ul>
+      </div>
+      <div class="panel panel--hole">
+        <div class="stamp">Спорно или не решено</div>
+        <ul>
+          <li>Работает ли теория для опиоидов. Есть серьёзное возражение: опиоиды в большинстве работ не разгоняют дофамин так, как этого требует теория. Авторы спорят, но вопрос открыт.</li>
+          <li>Важна ли сенситизация всё время или только на раннем этапе. Критики говорят «только вначале», авторы — «всё время, но зависит от обстановки».</li>
+          <li>Точная нервная механика. Отражает ли активность одной из областей полосатого тела привычку или усиленную тягу — не решено.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note-row">
+      <p>Отдельно отмечу то, что мне самому кажется самой честной строчкой в этом обзоре: те же авторы пишут, что механизмы зависимости <strong>перекрываются с механизмами обычных желаний</strong> — голода, влюблённости. Это не отдельная поломка. Это обычная система, работающая слишком громко.</p>
+      <aside class="note">Robinson &amp; Berridge, 2025, Annual Review of Psychology 76:29–58 — сводка через тридцать лет после исходной работы.</aside>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Обязательный раздел</div>
+      <h2>Что известно точно, а что я придумал</h2>
+    </div>
+
+    <div class="split wide">
+      <div class="panel panel--know">
+        <div class="stamp">Знаем</div>
+        <ul>
+          <li>Подсказка, связанная с наградой, сама вызывает тягу — до всякого получения.</li>
+          <li>Лекарства, добавляющие дофаминовый сигнал, повышают шанс сильного тягового поведения в 2–3,5 раза. 3090 человек, оценщики вслепую.</li>
+          <li>Это происходит у меньшинства принимающих. Дофамина одного мало.</li>
+          <li>«Нравится» при развитии зависимости, как правило, не падает — это позиция самих авторов теории.</li>
+        </ul>
+      </div>
+      <div class="panel panel--made">
+        <div class="stamp">Придумал</div>
+        <ul>
+          <li>Зазывала и кухня. Аналогия моя, она ничего не доказывает.</li>
+          <li>График с двумя линиями. Форма — из теории, но наклон, скорость и сам вид кривых я нарисовал сам. Это не чьи-то измерения.</li>
+          <li>Перенос всего этого на обычную жизнь без веществ и без болезни. Теория строилась на зависимостях; насколько она описывает ленту в телефоне или человека, о котором думаешь, — вопрос открытый.</li>
+        </ul>
+      </div>
+      <div class="panel panel--hole">
+        <div class="stamp">Дыра в данных</div>
+        <ul>
+          <li>За сколько недель или месяцев тяга успевает заметно вырасти у обычного человека — не измерено.</li>
+          <li>Есть ли у роста тяги потолок — неизвестно.</li>
+          <li>Почему одни люди уязвимы, а другие на тех же лекарствах нет — предсказывать заранее не умеем.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Не строим на этом</div>
+      <h2>Развенчанное</h2>
+    </div>
+
+    <div class="debunk wide">
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Раз человек продолжает — значит ему это нравится»</div>
+          <div class="why">Бытовая логика, и она неверна. Продолжение действия говорит о силе тяги, а не о величине удовольствия. Это два разных прибора, и весь этот урок про то, что их показания расходятся. Обратное тоже верно: «перестал» не означает «разонравилось».</div>
+        </div>
+      </div>
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Тяга растёт, потому что удовольствие выгорело»</div>
+          <div class="why">Это описание толерантности — когда для прежнего эффекта нужна бо́льшая доза. Толерантность существует, но она не объясняет рост тяги и не требуется для него. Авторы теории прямо пишут, что «нравится» при этом не снижается.</div>
+        </div>
+      </div>
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Достаточно перетерпеть, и подсказки потеряют силу»</div>
+          <div class="why">Главная и самая неприятная находка теории — в том, что усиленная тяга держится очень долго, в том числе после длительного воздержания. Именно поэтому срыв часто случается не от «слабости», а от встречи со старой подсказкой. Насколько это переносится с зависимостей на обычную жизнь — не установлено.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="hw wide">
+    <div class="eyebrow">Домашнее задание</div>
+    <h2>Найти свои подсказки</h2>
+
+    <p>В первом задании вы записывали две цифры. Теперь добавляется третья колонка, и она главная: <strong>что запустило тягу</strong>.</p>
+
+    <p>Смысл — поймать момент до желания. Не «захотелось посмотреть ленту», а «что было за секунду до того, как захотелось».</p>
+
+    <ol>
+      <li><div>Продолжаете вести те же две цифры: <b>тянет</b> (0–10, до начала) и <b>приятно</b> (0–10, в момент, не после).</div></li>
+      <li><div>Добавляете колонку <b>подсказка</b>. Что было непосредственно перед желанием? Варианты, которые встречаются чаще всего: закончил задачу, остался один, взял телефон за другим делом, определённое время суток, чьё-то имя, конкретное место, усталость, неловкий разговор.</div></li>
+      <li><div>Если подсказку поймать не удалось — так и пишите: <b>«не поймал»</b>. Это честный ответ и полезная строчка. Половина подсказок не осознаётся, это нормально.</div></li>
+      <li><div>Отдельным счётчиком — <b>пустые заходы</b>. Открыл и там ничего не было. Просто палочка. Это самая ценная цифра из всех, потому что в пустом заходе удовольствия ровно ноль, и всё, что его вызвало, — чистая тяга.</div></li>
+    </ol>
+
+    <p>Формат прежний, одна строка: <span style="font-family:var(--mono);font-size:.86em">21:10 · закрыл ноутбук · тянет 7 · лента · приятно 3</span></p>
+
+    <p class="warn"><b>Что считать подтверждением, а что опровержением.</b> Это важно проговорить заранее, иначе любой результат можно подогнать под теорию.</p>
+
+    <p class="warn"><b>В пользу механизма</b> будет говорить вот что: у одних и тех же занятий цифра «тянет» держится высоко или растёт от недели к неделе, а «приятно» стоит примерно на одном месте. Плюс много пустых заходов при высокой тяге.</p>
+
+    <p class="warn"><b>Против механизма</b> будет говорить: обе цифры ходят вместе — вверх вместе, вниз вместе. Или тяга падает вместе с удовольствием. Тогда расхождения у вас просто нет, и всю эту рамку к вашему случаю применять не надо. Я это скажу прямо, если так выйдет.</p>
+
+    <p class="warn"><b>Поправка к тому, что я говорил раньше.</b> В разговоре я предположил, что у вас «приятно» будет снижаться. Это неверная формулировка: авторы теории специально подчёркивают, что удовольствие в таких случаях обычно <em>не падает</em>. Расхождение возникает потому, что тяга <em>растёт</em>, а не потому, что удовольствие исчезает. Ищите расходящиеся линии, а не угасающую радость.</p>
+
+    <p class="warn"><b>И честно про ограничения.</b> Это один человек, без слепоты, и вы уже знаете, какого результата я жду. Это портит данные: зная гипотезу, легко невольно подгонять оценки. Приёма против этого нет. Есть только поправка — доверяйте счётчику пустых заходов больше, чем оценкам по десятибалльной шкале. Число открытий не переписывается памятью, а «приятно на 6» переписывается.</p>
+  </section>
+
+  <section class="takeaway wide">
+    <div class="eyebrow">Что запомнить</div>
+    <ol>
+      <li>
+        <div>
+          <div class="big">Тяга запускается подсказкой, а не удовольствием.</div>
+          <div class="sub">Значок, запах, время суток, человек. Подсказка тянет до того, как что-либо получено, — и поэтому может тянуть туда, где ничего нет.</div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="big">От повторения растёт зазывала, а не кухня.</div>
+          <div class="sub">Сила подсказки может расти годами. Удовольствие от самой вещи при этом остаётся примерно прежним. Ищите расхождение линий, а не угасание радости.</div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="big">«Продолжает» не значит «нравится».</div>
+          <div class="sub">Лекарство, добавляющее дофамин, поднимает шанс сильной тяги в 2–3,5 раза у 3090 обследованных — и ни одного сообщения о выросшей способности наслаждаться. Но происходит это у меньшинства: одного дофамина мало.</div>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="sources wide">
+    <div class="eyebrow">Источники — можно проверять</div>
+    <ol>
+      <li>Robinson TE, Berridge KC. The neural basis of drug craving: an incentive-sensitization theory of addiction. <i>Brain Research Reviews</i>, 1993;18(3):247–291. <a href="https://pubmed.ncbi.nlm.nih.gov/8401595/">PMID 8401595</a></li>
+      <li>Robinson TE, Berridge KC. The Incentive-Sensitization Theory of Addiction 30 Years On. <i>Annual Review of Psychology</i>, 2025;76:29–58. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11773642/">PMC11773642</a></li>
+      <li>Weintraub D, Koester J, Potenza MN, et al. Impulse control disorders in Parkinson disease: a cross-sectional study of 3090 patients. <i>Archives of Neurology</i>, 2010;67(5):589–595. <a href="https://pubmed.ncbi.nlm.nih.gov/20457959/">PMID 20457959</a></li>
+      <li>Обзор ведения и обратимости при отмене препарата: Impulse Control Disorders in Parkinson's Disease — overview of risk factors, pathogenesis and pharmacological management. <i>CNS Drugs</i>, 2024. <a href="https://link.springer.com/article/10.1007/s40263-024-01087-y">doi 10.1007/s40263-024-01087-y</a></li>
+      <li>Связь такого поведения со сниженной способностью получать удовольствие: Trait Impulsivity and Anhedonia as gateways for ICD in Parkinson's Disease. <i>Frontiers in Psychiatry</i>, 2016;7:91. <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4884740/">PMC4884740</a></li>
+      <li>Возражение про опиоиды: Can the incentive-sensitization theory of addiction incorporate addiction to opioid drugs? <i>Psychopharmacology</i>, 2025. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC13091067/">PMC13091067</a></li>
+    </ol>
+    <p style="font-family:var(--mono);font-size:.73rem;color:var(--muted);line-height:1.6">Десятилетнее наблюдение за развитием алкогольной зависимости («хочу» растёт, «нравится» ровное) приведено в обзоре 2025 года — я цитирую его по обзору, а не по исходной статье, и отмечаю это отдельно.</p>
+  </section>
+
+</article>
+</body>
+</html>
