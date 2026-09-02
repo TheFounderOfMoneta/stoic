@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Почему тянет всё сильнее</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --ground:#EFF1F3;
+  --surface:#FBFCFD;
+  --surface-2:#E7EAEE;
+  --ink:#15181C;
+  --ink-soft:#3A424C;
+  --muted:#5E6672;
+  --rule:#D3D8DE;
+  --rule-soft:#E1E5EA;
+
+  --want:#A8471B;
+  --learn:#7E5A0E;
+  --like:#8C2D5E;
+  --mood:#454A78;
+  --value:#1B5C68;
+  --alarm:#96182B;
+
+  --want-bg:#F6E7DE;
+  --learn-bg:#F4EDD9;
+  --like-bg:#F6E3EC;
+  --mood-bg:#E5E7F4;
+  --value-bg:#DDECEE;
+  --alarm-bg:#F7E2E4;
+
+  --measure:35rem;
+  --aside:14rem;
+  --sans:"IBM Plex Sans","Segoe UI",Roboto,Arial,sans-serif;
+  --serif:"Literata","Georgia",serif;
+  --mono:"IBM Plex Mono","SF Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F1216;
+    --surface:#171B21;
+    --surface-2:#20252C;
+    --ink:#E6E9ED;
+    --ink-soft:#C4CBD3;
+    --muted:#959EAA;
+    --rule:#2C323A;
+    --rule-soft:#242A31;
+
+    --want:#E08A55;
+    --learn:#D0AC55;
+    --like:#E183B2;
+    --mood:#9AA1DE;
+    --value:#5FB2C0;
+    --alarm:#EC8792;
+
+    --want-bg:#2C1D14;
+    --learn-bg:#292214;
+    --like-bg:#2B1721;
+    --mood-bg:#1C1E30;
+    --value-bg:#132428;
+    --alarm-bg:#2C1519;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F1216;
+  --surface:#171B21;
+  --surface-2:#20252C;
+  --ink:#E6E9ED;
+  --ink-soft:#C4CBD3;
+  --muted:#959EAA;
+  --rule:#2C323A;
+  --rule-soft:#242A31;
+
+  --want:#E08A55;
+  --learn:#D0AC55;
+  --like:#E183B2;
+  --mood:#9AA1DE;
+  --value:#5FB2C0;
+  --alarm:#EC8792;
+
+  --want-bg:#2C1D14;
+  --learn-bg:#292214;
+  --like-bg:#2B1721;
+  --mood-bg:#1C1E30;
+  --value-bg:#132428;
+  --alarm-bg:#2C1519;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:17px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--surface-2)}
+:focus-visible{outline:2px solid var(--want);outline-offset:3px;border-radius:2px}
+
+.lesson{width:min(100% - 2.25rem,51rem);margin-inline:auto;padding:0 0 5rem;display:flex;flex-direction:column;gap:1.15rem}
+.lesson > *{max-width:var(--measure)}
+.lesson > .wide{max-width:none}
+
+p{margin:0}
+h1,h2,h3{margin:0;font-family:var(--serif);text-wrap:balance;font-weight:600}
+strong{font-weight:600}
+em{font-style:italic}
+a{color:inherit;text-decoration-color:var(--rule);text-underline-offset:3px}
+a:hover{text-decoration-color:currentColor}
+
+/* ---------- header ---------- */
+.masthead{max-width:none;border-bottom:1px solid var(--rule);padding:3.2rem 0 1.9rem;margin-bottom:1.4rem;display:flex;flex-direction:column;gap:1.1rem}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:clamp(2.05rem,6vw,3.05rem);line-height:1.08;letter-spacing:-.015em;max-width:16ch}
+.dek{max-width:var(--measure);color:var(--ink-soft);font-size:1.06rem}
+
+/* ---------- section heads ---------- */
+.sec{max-width:none;margin-top:2.9rem;display:flex;flex-direction:column;gap:1.15rem}
+.sec > *{max-width:var(--measure)}
+.sec > .wide{max-width:none}
+.sec-head{display:flex;flex-direction:column;gap:.3rem;max-width:var(--measure)}
+.sec-head .eyebrow{color:var(--muted)}
+h2{font-size:1.62rem;line-height:1.2;letter-spacing:-.01em}
+h3{font-family:var(--sans);font-size:1rem;font-weight:600;letter-spacing:.005em}
+
+/* ---------- three sentences ---------- */
+.thesis{max-width:none;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.5rem 1.6rem;display:flex;flex-direction:column;gap:.85rem}
+.thesis .eyebrow{margin-bottom:.15rem}
+.thesis ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.85rem;counter-reset:t}
+.thesis li{counter-increment:t;display:grid;grid-template-columns:1.6rem minmax(0,1fr);gap:.65rem;max-width:var(--measure)}
+.thesis li > *{grid-column:2}
+.thesis li::before{content:counter(t);font-family:var(--mono);font-size:.82rem;color:var(--muted);padding-top:.28rem}
+
+/* ---------- margin notes ---------- */
+.note-row{max-width:none;display:grid;grid-template-columns:minmax(0,var(--measure)) minmax(0,var(--aside));gap:1.75rem;align-items:start}
+.note{font-family:var(--mono);font-size:.74rem;line-height:1.5;color:var(--muted);border-left:2px solid var(--rule);padding-left:.7rem}
+@media (max-width:62rem){
+  .note-row{grid-template-columns:1fr;gap:.7rem}
+  .note{max-width:var(--measure)}
+}
+
+/* ---------- chips ---------- */
+.chip{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;padding:.14em .5em;border-radius:2px;white-space:nowrap;vertical-align:.08em}
+.chip--want{background:var(--want-bg);color:var(--want)}
+.chip--learn{background:var(--learn-bg);color:var(--learn)}
+.chip--like{background:var(--like-bg);color:var(--like)}
+.chip--mood{background:var(--mood-bg);color:var(--mood)}
+.chip--value{background:var(--value-bg);color:var(--value)}
+
+/* ---------- worker cards ---------- */
+.workers{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}
+.worker{background:var(--surface);border:1px solid var(--rule);border-top:3px solid var(--wc);border-radius:3px;padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.6rem}
+.worker--want{--wc:var(--want)}
+.worker--like{--wc:var(--like)}
+.worker--value{--wc:var(--value)}
+.worker h3{font-family:var(--mono);font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--wc)}
+.worker .role{font-family:var(--serif);font-size:1.22rem;line-height:1.25;font-weight:600}
+.worker p{font-size:.94rem;color:var(--ink-soft)}
+.worker .tag{font-family:var(--mono);font-size:.71rem;line-height:1.45;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem;margin-top:.15rem}
+
+/* ---------- callout ---------- */
+.callout{max-width:none;background:var(--surface-2);border-radius:3px;padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:.7rem}
+.callout .lead{font-family:var(--serif);font-size:1.3rem;line-height:1.3;font-weight:600;max-width:26ch}
+.callout p{max-width:var(--measure);color:var(--ink-soft);font-size:.97rem}
+
+/* ---------- evidence cards ---------- */
+.evidence{max-width:none;display:flex;flex-direction:column;gap:.85rem}
+.ev{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.15rem 1.25rem;display:flex;flex-direction:column;gap:.9rem}
+.ev-top{display:flex;flex-wrap:wrap;gap:.5rem .7rem;align-items:baseline}
+.ev-top .claim{font-family:var(--serif);font-size:1.12rem;font-weight:600;line-height:1.3;flex:1 1 18rem;min-width:0}
+.ev dl{margin:0;display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:.42rem 1rem;font-size:.9rem}
+.ev dt{font-family:var(--mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding-top:.25rem}
+.ev dd{margin:0;color:var(--ink-soft)}
+.ev .src{font-family:var(--mono);font-size:.71rem;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem}
+@media (max-width:38rem){
+  .ev dl{grid-template-columns:1fr;gap:.15rem}
+  .ev dd{margin-bottom:.5rem}
+}
+
+/* ---------- table ---------- */
+.tablewrap{max-width:none;overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:44rem;font-size:.9rem}
+th,td{text-align:left;padding:.75rem .9rem;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td:first-child{white-space:nowrap}
+td .sysname{font-family:var(--mono);font-size:.74rem;letter-spacing:.07em;text-transform:uppercase}
+.r-want .sysname{color:var(--want)}
+.r-like .sysname{color:var(--like)}
+.r-learn .sysname{color:var(--learn)}
+.r-mood .sysname{color:var(--mood)}
+
+/* ---------- figures ---------- */
+figure{margin:0;max-width:none;display:flex;flex-direction:column;gap:.7rem}
+.figbox{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.35rem 1.2rem}
+.figbox svg{display:block;min-width:32rem;width:100%;height:auto}
+figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(--muted);max-width:var(--measure)}
+.svg-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase}
+.svg-name{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+.svg-body{font-family:var(--sans);font-size:12.5px}
+.svg-small{font-family:var(--sans);font-size:11.5px}
+
+/* ---------- know / invented ---------- */
+.split{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem}
+.panel{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.7rem}
+.panel .stamp{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;padding:.2em .55em;border-radius:2px;align-self:flex-start}
+.panel--know .stamp{background:var(--value-bg);color:var(--value)}
+.panel--made .stamp{background:var(--learn-bg);color:var(--learn)}
+.panel--hole .stamp{background:var(--alarm-bg);color:var(--alarm)}
+.panel ul{margin:0;padding-left:1.05rem;display:flex;flex-direction:column;gap:.55rem;font-size:.93rem;color:var(--ink-soft)}
+.panel li::marker{color:var(--muted)}
+
+/* ---------- debunked ---------- */
+.debunk{max-width:none;display:flex;flex-direction:column;gap:.7rem}
+.dbk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.9rem;align-items:start;border-left:3px solid var(--alarm);background:var(--surface);padding:.9rem 1.1rem;border-radius:0 3px 3px 0}
+.dbk .x{font-family:var(--mono);color:var(--alarm);font-size:.95rem;padding-top:.05rem}
+.dbk .what{font-weight:600;font-size:.96rem}
+.dbk .why{font-size:.9rem;color:var(--ink-soft);margin-top:.2rem}
+
+/* ---------- homework ---------- */
+.hw{max-width:none;border:1px solid var(--want);border-radius:3px;background:var(--surface);padding:1.5rem 1.55rem;display:flex;flex-direction:column;gap:1.1rem}
+.hw .eyebrow{color:var(--want)}
+.hw h2{font-size:1.35rem}
+.hw ol{margin:0;padding:0;list-style:none;counter-reset:h;display:flex;flex-direction:column;gap:.9rem}
+.hw ol li{counter-increment:h;display:grid;grid-template-columns:1.9rem 1fr;gap:.6rem;max-width:var(--measure)}
+.hw ol li::before{content:counter(h);font-family:var(--mono);font-size:.74rem;color:var(--want);border:1px solid var(--rule);border-radius:50%;width:1.5rem;height:1.5rem;display:grid;place-items:center;margin-top:.15rem}
+.hw p{max-width:var(--measure);font-size:.95rem;color:var(--ink-soft)}
+.hw .warn{font-size:.9rem;border-top:1px solid var(--rule-soft);padding-top:.85rem;color:var(--ink-soft)}
+.hw .warn b{color:var(--ink)}
+
+/* ---------- takeaways ---------- */
+.takeaway{max-width:none;border-top:2px solid var(--ink);padding-top:1.4rem;display:flex;flex-direction:column;gap:1.1rem}
+.takeaway ol{margin:0;padding:0;list-style:none;counter-reset:k;display:flex;flex-direction:column;gap:1rem}
+.takeaway li{counter-increment:k;display:grid;grid-template-columns:2.2rem 1fr;gap:.7rem;max-width:var(--measure)}
+.takeaway li::before{content:counter(k);font-family:var(--serif);font-size:1.5rem;font-weight:700;color:var(--muted);line-height:1}
+.takeaway .big{font-family:var(--serif);font-size:1.1rem;line-height:1.35;font-weight:600}
+.takeaway .sub{font-size:.93rem;color:var(--ink-soft);margin-top:.15rem}
+
+/* ---------- sources ---------- */
+.sources{max-width:none;margin-top:3rem;border-top:1px solid var(--rule);padding-top:1.3rem;display:flex;flex-direction:column;gap:.75rem}
+.sources ol{margin:0;padding-left:1.3rem;display:flex;flex-direction:column;gap:.6rem;font-family:var(--mono);font-size:.75rem;line-height:1.6;color:var(--muted)}
+.sources li::marker{color:var(--rule)}
+.sources a{color:var(--ink-soft)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- personal case ---------- */
+.mine{max-width:none;border-left:3px solid var(--ink);background:var(--surface);padding:1.15rem 1.3rem;border-radius:0 3px 3px 0;display:flex;flex-direction:column;gap:.65rem}
+.mine .who{font-family:var(--mono);font-size:.67rem;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.mine .said{font-family:var(--serif);font-size:1.08rem;line-height:1.42;font-style:italic;max-width:var(--measure)}
+.mine p{font-size:.94rem;color:var(--ink-soft);max-width:var(--measure)}
+.mine .read{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem;max-width:var(--measure)}
+
+/* ---------- manipulation ---------- */
+.tricks{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr));gap:1rem}
+.trick{border:1px solid var(--rule);border-top:3px solid var(--alarm);border-radius:3px;background:var(--surface);padding:1.15rem 1.2rem;display:flex;flex-direction:column;gap:.55rem}
+.trick h3{font-family:var(--mono);font-size:.7rem;letter-spacing:.11em;text-transform:uppercase;color:var(--alarm);font-weight:400}
+.trick .move{font-family:var(--serif);font-size:1.06rem;font-weight:600;line-height:1.3}
+.trick p{font-size:.92rem;color:var(--ink-soft)}
+.trick .def{font-family:var(--mono);font-size:.71rem;line-height:1.55;color:var(--muted);border-top:1px solid var(--rule-soft);padding-top:.6rem;margin-top:.1rem}
+.trick .def b{color:var(--value)}
+
+/* ---------- source key ---------- */
+.keys{max-width:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.85rem}
+.key{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:.95rem 1.05rem;display:flex;flex-direction:column;gap:.4rem}
+.key .letter{font-family:var(--mono);font-size:1.5rem;line-height:1;font-weight:500}
+.key .nm{font-family:var(--sans);font-weight:600;font-size:.95rem}
+.key p{font-size:.88rem;color:var(--ink-soft)}
+.key--k{border-top:3px solid var(--like)} .key--k .letter{color:var(--like)}
+.key--o{border-top:3px solid var(--value)} .key--o .letter{color:var(--value)}
+.key--s{border-top:3px solid var(--mood)} .key--s .letter{color:var(--mood)}
+.key--n{border-top:3px solid var(--want)} .key--n .letter{color:var(--want)}
+
+.figbox{position:relative}
+.figbadge{position:absolute;top:.7rem;right:.8rem;font-family:var(--mono);font-size:.63rem;letter-spacing:.11em;text-transform:uppercase;color:var(--learn);background:var(--learn-bg);padding:.22em .55em;border-radius:2px}
+.svg-tiny{font-family:var(--sans);font-size:10.5px}
+
+/* ---------- structure ---------- */
+.partbar{max-width:none;margin-top:3.6rem;padding-top:1.1rem;border-top:2px solid var(--ink);display:flex;flex-direction:column;gap:.28rem}
+.partbar .pn{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.partbar .pt{font-family:var(--serif);font-size:1.18rem;font-weight:600;line-height:1.25;max-width:var(--measure)}
+.partbar + .sec{margin-top:1.5rem}
+.toc{max-width:none;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:1.15rem}
+.toc > .eyebrow{color:var(--muted)}
+.toc .grp{display:flex;flex-direction:column;gap:.45rem}
+.toc .gh{font-family:var(--mono);font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;color:var(--want)}
+.toc ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.34rem}
+.toc li{display:grid;grid-template-columns:2.7rem minmax(0,1fr);gap:.5rem;font-size:.94rem;color:var(--ink-soft);max-width:var(--measure)}
+.toc li i{font-family:var(--mono);font-size:.74rem;color:var(--muted);font-style:normal;padding-top:.17rem}
+
+.asks{font-family:var(--sans);font-size:.96rem;line-height:1.5;color:var(--muted);font-style:italic;max-width:var(--measure);margin-top:.15rem}
+.refcard{max-width:none;margin-top:3.4rem;border-top:2px solid var(--ink);padding-top:1.35rem;display:flex;flex-direction:column;gap:1rem}
+.refcard .rt{font-family:var(--serif);font-size:1.2rem;font-weight:600}
+.toc li i{color:var(--want)}
+</style>
+</head>
+<body>
+<article class="lesson">
+
+  <header class="masthead">
+    <div class="eyebrow">Курс о мотивации · Урок 2</div>
+    <h1>Почему тянет<br>всё сильнее</h1>
+    <p class="dek">В первом уроке мы разделили тягу и удовольствие. Теперь один вопрос: почему тяга бывает огромной и почему она растёт, даже когда радости всё меньше.</p>
+  </header>
+
+  <section class="thesis">
+    <div class="eyebrow">Если совсем коротко</div>
+    <ol>
+      <li>Тягу запускает не удовольствие, а <b>сигнал</b> — вещь, которая раньше совпадала с чем-то хорошим.</li>
+      <li>Сигнал срабатывает <b>до</b> того, как вы что-то получили. Поэтому тянуть может и туда, где в конце ничего нет.</li>
+      <li>От повторения сигнал становится сильнее. А удовольствие от самой вещи сильнее не становится. Разрыв растёт годами.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Начнём с собаки и пакета</h2>
+    </div>
+
+    <p>У кого была собака, тот это видел.</p>
+
+    <p>Вы берёте пакет с кормом. Ещё ничего не насыпали, пакет только зашуршал. Собака уже в кухне, уже прыгает, уже не может стоять на месте.</p>
+
+    <p>Заметьте момент. <strong>Еды ещё нет.</strong> Во рту у собаки пусто. Она не пробует и не радуется вкусу — вкуса пока не существует.</p>
+
+    <p>Но тянет её уже сейчас, и сильно.</p>
+
+    <div class="callout wide">
+      <div class="lead">Значит, тягу запускает не еда. Тягу запускает шуршание.</div>
+      <p>Шуршание пакета само по себе — ничто. Оно не питательное и не вкусное. Оно просто много раз случалось перед едой. Этого хватило, чтобы оно начало тянуть.</p>
+    </div>
+
+    <p>Такую вещь дальше будем называть <strong>сигналом</strong>. Сигнал — это то, что раньше совпадало с чем-то хорошим и теперь тянет само.</p>
+
+    <p>У людей то же самое, только сигналов больше.</p>
+
+    <p>Запах кофе из кофейни по дороге на работу — бодрит ещё до кофе. Звук уведомления — рука тянется к телефону раньше, чем вы узнали, что там. У курильщика сигарета после еды тянет сильнее не потому, что она вкуснее: просто она сотни раз совпадала с концом обеда.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Сигнал срабатывает раньше, чем что-то произошло</h2>
+    </div>
+
+    <p>Из этого сразу следует важное.</p>
+
+    <p>Раз тяга включается от сигнала, а не от результата — <strong>ей не нужно, чтобы в конце что-то было.</strong></p>
+
+    <p>Собака бежит на шуршание, даже если вы просто переставили пакет. Рука тянется к телефону, даже когда там ничего нового. Тяга уже сработала — она сработала на входе, а не на выходе.</p>
+
+    <p>Вот почему можно бесконечно повторять действие, которое почти ничего не приносит. Не потому что вы забыли, что оно ничего не приносит. А потому что <strong>решение тянуться принимается раньше, чем вы это вспомните.</strong></p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Что увидели у обезьян</h2>
+    </div>
+
+    <p>Это удалось увидеть напрямую. Обезьяне давали каплю сладкого сока, а перед соком включали лампочку. И записывали, что делают дофаминовые клетки — те самые, которые отвечают за тягу.</p>
+
+    <p><strong>В самом начале</strong> клетки давали вспышку в момент, когда приходил сок. Лампочка их не интересовала: она пока ничего не значила.</p>
+
+    <p><strong>После многих повторений</strong> картина перевернулась. Вспышка стала приходить на лампочку. А на сам сок — уже нет.</p>
+
+    <figure class="wide">
+      <div class="figbox">
+        <svg viewBox="0 0 880 300" role="img" aria-label="Схема: сначала вспышка активности приходит на сок, после обучения она переезжает на лампочку, а на сок уже не приходит">
+          <text class="svg-label" x="40" y="42" style="fill:var(--muted)">Сначала</text>
+          <line x1="40" y1="108" x2="700" y2="108" style="stroke:var(--rule);stroke-width:1.5"/>
+          <rect x="150" y="82" width="120" height="52" rx="3" style="fill:var(--surface-2);stroke:var(--rule)"/>
+          <text class="svg-body" x="210" y="113" text-anchor="middle" style="fill:var(--ink-soft)">лампочка</text>
+          <rect x="470" y="82" width="120" height="52" rx="3" style="fill:var(--like-bg);stroke:var(--rule)"/>
+          <text class="svg-body" x="530" y="113" text-anchor="middle" style="fill:var(--ink-soft)">сок</text>
+          <path d="M530 76 L530 52" style="stroke:var(--want);stroke-width:3"/>
+          <path d="M524 56 L530 40 L536 56 Z" style="fill:var(--want)"/>
+          <text class="svg-small" x="604" y="50" style="fill:var(--want)">вспышка здесь</text>
+
+          <text class="svg-label" x="40" y="212" style="fill:var(--muted)">После многих повторений</text>
+          <line x1="40" y1="278" x2="700" y2="278" style="stroke:var(--rule);stroke-width:1.5"/>
+          <rect x="150" y="252" width="120" height="52" rx="3" style="fill:var(--want-bg);stroke:var(--want)"/>
+          <text class="svg-body" x="210" y="283" text-anchor="middle" style="fill:var(--ink-soft)">лампочка</text>
+          <rect x="470" y="252" width="120" height="52" rx="3" style="fill:var(--surface-2);stroke:var(--rule)"/>
+          <text class="svg-body" x="530" y="283" text-anchor="middle" style="fill:var(--muted)">сок</text>
+          <path d="M210 246 L210 222" style="stroke:var(--want);stroke-width:3"/>
+          <path d="M204 226 L210 210 L216 226 Z" style="fill:var(--want)"/>
+          <text class="svg-small" x="284" y="220" style="fill:var(--want)">вспышка переехала сюда</text>
+          <text class="svg-small" x="604" y="220" style="fill:var(--muted)">а здесь её больше нет</text>
+        </svg>
+      </div>
+      <figcaption>Вспышка активности перебирается с награды на то, что награду предсказывает. Записывали активность отдельных клеток среднего мозга у обезьян. Schultz, 1998.</figcaption>
+    </figure>
+
+    <p>Это и есть шуршание пакета, только измеренное.</p>
+
+    <p>Система тяги <strong>переезжает вперёд по цепочке</strong> — на самое раннее, что надёжно предсказывает хорошее. И дальше тянет именно оттуда.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Сигнал растёт. Удовольствие — нет</h2>
+    </div>
+
+    <p>Теперь главное этого урока.</p>
+
+    <p>Представьте ресторан, мимо которого вы ходите десять лет. У дверей стоит зазывала.</p>
+
+    <p>Каждый год он кричит громче. Машет активнее. Хватает за рукав настойчивее. Через десять лет пройти мимо него почти невозможно.</p>
+
+    <p><strong>А кухня всё это время не менялась.</strong> Те же блюда, того же качества. Ужин ровно такой же, как был десять лет назад.</p>
+
+    <div class="callout wide">
+      <div class="lead">От повторения усиливается зазывала. Кухня не усиливается.</div>
+      <p>Зазывала — это сигнал, то есть сила, с которой вас тянет внутрь. Кухня — это удовольствие от самой вещи. Первое растёт годами. У второго такого механизма роста просто нет.</p>
+    </div>
+
+    <p>Итог через десять лет: вас затаскивает очень громкий зазывала на совершенно обычный ужин.</p>
+
+    <p>И вот прямой ответ на вопрос, с которого начался урок. <strong>Тянет невероятно сильно не потому, что там невероятно хорошо.</strong> А потому, что сигнал накачивался годами, а удовольствие всё это время стояло на месте.</p>
+
+    <p>Отсюда же и «хочется повторять бесконечно, хотя кайфа нет». Повторения кормят зазывалу. Кухню они не кормят.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Крепче всего держит непредсказуемость</h2>
+    </div>
+
+    <p>Есть ещё одна вещь, и она делает тягу особенно живучей.</p>
+
+    <p>Сравните два случая.</p>
+
+    <p><strong>Награда каждый раз.</strong> Нажал кнопку — получил. Всегда. Если однажды награда пропадёт, вы бросите быстро: пара попыток, и понятно, что кончилось.</p>
+
+    <p><strong>Награда через раз и наугад.</strong> Иногда есть, иногда нет, предсказать нельзя. Если она пропадёт совсем, вы будете продолжать <strong>гораздо дольше</strong>. Потому что «сейчас не вышло» ничего не доказывает — раньше тоже часто не выходило, а потом выходило.</p>
+
+    <p>Это одна из самых надёжно повторённых вещей в науке об обучении.</p>
+
+    <p style="font-family:var(--mono);font-size:.78rem;color:var(--muted);line-height:1.6">Как проверяли: животные нажимают на рычаг, потом награду отключают и считают, сколько нажатий человек ещё сделает. Десятилетия работ, начиная со Скиннера.</p>
+
+    <p>Именно поэтому так тяжело бросать вещи, которые срабатывают редко. Редкое срабатывание — это не слабое подкрепление. Это <strong>самое устойчивое из возможных</strong>.</p>
+
+    <p>Оговорка, чтобы не продать вам лишнего. Из этого часто делают вывод «телефон — это игровой автомат». Я его делать не буду: в автомате выигрыш зависит от числа ваших нажатий, а сообщение придёт тогда, когда его отправят, сколько ни проверяй. Это разные расписания, и ведут они себя по-разному. Механизм «непредсказуемое держит крепче» — настоящий. Слоган про автомат — упрощение.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Самое сильное доказательство, и оно на людях</h2>
+    </div>
+
+    <p>Всё выше — про сигналы и повторения. Но есть способ проверить прямее: взять и добавить человеку дофамина.</p>
+
+    <p>Так делают в медицине. При болезни Паркинсона дофаминовых клеток не хватает, и часть лекарств прямо включает те приёмники, на которые обычно действует дофамин.</p>
+
+    <p>У части таких пациентов начинается то, чего раньше не было. Азартная игра. Скупка вещей. Приступы переедания.</p>
+
+    <div class="evidence wide">
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Обследовали 3090 пациентов в 46 центрах</div>
+        </div>
+        <p style="font-size:.96rem;color:var(--ink-soft);max-width:var(--measure)">Важная деталь: те, кто оценивал пациентов, <b>не знали, какие лекарства человек принимает</b>. Так убирают подгонку под ожидание.</p>
+        <p style="font-size:.96rem;color:var(--ink-soft);max-width:var(--measure)">Среди принимавших такие лекарства подобное поведение нашли у <b>17 %</b>. Среди не принимавших — у <b>7 %</b>. Разница одинаковая для разных препаратов этого класса, значит дело в самом классе.</p>
+        <p style="font-size:.96rem;color:var(--ink-soft);max-width:var(--measure)">И ни одного сообщения о том, что у этих людей выросла <b>способность наслаждаться</b>. Выросла тяга.</p>
+        <div class="src">Weintraub et al., 2010, Archives of Neurology 67:589–595</div>
+      </div>
+    </div>
+
+    <p>Меняют один параметр — количество дофаминового сигнала. Появляется огромная тяга к вещам, к которым её не было. Убирают лекарство — обычно проходит.</p>
+
+    <p><strong>Две честные оговорки.</strong> Во-первых, 17 % — это меньшинство. У большинства людей на тех же лекарствах ничего подобного не происходит, значит одного дофамина <em>мало</em>, нужно что-то ещё. Во-вторых, это больные люди с уже повреждённой системой, и переносить на здоровый мозг напрямую нельзя.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Одно развенчание</h2>
+    </div>
+
+    <div class="debunk wide">
+      <div class="dbk">
+        <div class="x">✕</div>
+        <div>
+          <div class="what">«Раз человек продолжает — значит, ему это нравится»</div>
+          <div class="why">Обычная бытовая логика, и она неверна. Продолжение говорит о силе тяги, а не о величине удовольствия. Весь урок про то, что первое умеет расти отдельно от второго. Обратное тоже неверно: «перестал» не значит «разонравилось» — мог просто исчезнуть сигнал. Уехал в другой город, поменял работу, выбросил пепельницу.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Что мы знаем, а что я упростил</h2>
+    </div>
+
+    <div class="split wide">
+      <div class="panel panel--know">
+        <div class="stamp">Знаем</div>
+        <ul>
+          <li>Вспышка активности дофаминовых клеток переезжает с награды на то, что её предсказывает. Одна из самых воспроизводимых находок в области.</li>
+          <li>Непредсказуемое подкрепление держит поведение дольше, чем постоянное.</li>
+          <li>Лекарство, добавляющее дофаминовый сигнал, поднимает шанс сильной тяги примерно вдвое-втрое. 3090 человек, оценщики вслепую. И только у меньшинства.</li>
+        </ul>
+      </div>
+      <div class="panel panel--made">
+        <div class="stamp">Упростил</div>
+        <ul>
+          <li>Зазывала и кухня — моя картинка для запоминания, не устройство мозга.</li>
+          <li>«Сигнал растёт годами» построено в основном на изучении зависимостей. Насколько это описывает обычную жизнь без веществ — вопрос открытый, и честного ответа у меня нет.</li>
+          <li>Опыт с лампочкой — обезьяны и электроды. Переносить на человеческие сигналы можно только по форме, а не буквально.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="hw wide">
+    <div class="eyebrow">Домашнее задание</div>
+    <h2>Найти свои сигналы</h2>
+
+    <p>В прошлый раз вы записывали две цифры. Добавляется одно слово, и оно тут главное.</p>
+
+    <ol>
+      <li><div>Продолжаете те же две цифры: <b>хочу</b> (0–10, до начала) и <b>приятно</b> (0–10, в середине).</div></li>
+      <li><div>Добавляете <b>сигнал</b>: что было прямо перед тем, как захотелось. Не «почему я этого хочу», а буквально — что случилось за секунду до. Чаще всего это: закончил дело, остался один, взял телефон за другим делом, определённое время суток, конкретное место, устал.</div></li>
+      <li><div>Не поймали — так и пишите: <b>«не поймал»</b>. Это честная запись. Половина сигналов не осознаётся, и это нормально.</div></li>
+    </ol>
+
+    <p>Строка: <span style="font-family:var(--mono);font-size:.86em">21:10 · закрыл ноутбук · лента · хочу 7 · приятно 3</span></p>
+
+    <p class="warn"><b>Что искать.</b> Повторы в колонке «сигнал». Если одно и то же событие раз за разом стоит перед желанием — вы нашли свой шуршащий пакет. Их обычно немного, три-четыре штуки на всю жизнь человека.</p>
+
+    <p class="warn"><b>Если хочется больше.</b> Заведите отдельную палочку для <b>пустых заходов</b>: потянуло, сделали, а там ничего не было. Эта цифра прямее всего показывает силу сигнала — потому что удовольствия в пустом заходе ровно ноль, значит тянуло чем-то другим.</p>
+  </section>
+
+  <section class="takeaway wide">
+    <div class="eyebrow">Что запомнить</div>
+    <ol>
+      <li>
+        <div>
+          <div class="big">Тягу запускает сигнал, а не удовольствие.</div>
+          <div class="sub">Собака бежит на шуршание пакета, когда еды ещё нет. Поэтому тянуть может и туда, где в конце пусто.</div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="big">Сигнал растёт от повторения. Удовольствие не растёт.</div>
+          <div class="sub">Зазывала кричит громче год от года, кухня остаётся прежней. Через десять лет тянет невероятно сильно на совершенно обычный ужин.</div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="big">Крепче всего держит то, что срабатывает редко и наугад.</div>
+          <div class="sub">Редкое срабатывание — это не слабое подкрепление, а самое устойчивое. Поэтому такие вещи и бросать тяжелее всего.</div>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="sources wide">
+    <div class="eyebrow">Источники</div>
+    <ol>
+      <li>Schultz W. Predictive reward signal of dopamine neurons. <i>Journal of Neurophysiology</i>, 1998;80(1):1–27. <a href="https://pubmed.ncbi.nlm.nih.gov/9658025/">PMID 9658025</a></li>
+      <li>Schultz W, Dayan P, Montague PR. A neural substrate of prediction and reward. <i>Science</i>, 1997;275(5306):1593–1599. <a href="https://pubmed.ncbi.nlm.nih.gov/9054347/">PMID 9054347</a></li>
+      <li>Weintraub D et al. Impulse control disorders in Parkinson disease: a cross-sectional study of 3090 patients. <i>Archives of Neurology</i>, 2010;67(5):589–595. <a href="https://pubmed.ncbi.nlm.nih.gov/20457959/">PMID 20457959</a></li>
+      <li>Robinson TE, Berridge KC. The neural basis of drug craving: an incentive-sensitization theory of addiction. <i>Brain Research Reviews</i>, 1993;18(3):247–291. <a href="https://pubmed.ncbi.nlm.nih.gov/8401595/">PMID 8401595</a></li>
+    </ol>
+  </section>
+
+</article>
+</body>
+</html>
