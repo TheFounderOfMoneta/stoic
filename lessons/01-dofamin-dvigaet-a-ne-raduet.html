@@ -279,6 +279,19 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 .figbox{position:relative}
 .figbadge{position:absolute;top:.7rem;right:.8rem;font-family:var(--mono);font-size:.63rem;letter-spacing:.11em;text-transform:uppercase;color:var(--learn);background:var(--learn-bg);padding:.22em .55em;border-radius:2px}
 .svg-tiny{font-family:var(--sans);font-size:10.5px}
+
+/* ---------- structure ---------- */
+.partbar{max-width:none;margin-top:3.6rem;padding-top:1.1rem;border-top:2px solid var(--ink);display:flex;flex-direction:column;gap:.28rem}
+.partbar .pn{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.partbar .pt{font-family:var(--serif);font-size:1.18rem;font-weight:600;line-height:1.25;max-width:var(--measure)}
+.partbar + .sec{margin-top:1.5rem}
+.toc{max-width:none;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:1.15rem}
+.toc > .eyebrow{color:var(--muted)}
+.toc .grp{display:flex;flex-direction:column;gap:.45rem}
+.toc .gh{font-family:var(--mono);font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;color:var(--want)}
+.toc ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.34rem}
+.toc li{display:grid;grid-template-columns:2.7rem minmax(0,1fr);gap:.5rem;font-size:.94rem;color:var(--ink-soft);max-width:var(--measure)}
+.toc li i{font-family:var(--mono);font-size:.74rem;color:var(--muted);font-style:normal;padding-top:.17rem}
 </style>
 </head>
 <body>
@@ -299,9 +312,47 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
     </ol>
   </section>
 
+  <section class="toc">
+    <div class="eyebrow">Из чего состоит урок</div>
+    <div class="grp">
+      <div class="gh">Часть I · карта</div>
+      <ul>
+        <li><i>1</i><span>Ваше утро, разобранное на части</span></li>
+        <li><i>2</i><span>Три работника и одно табло</span></li>
+        <li><i>3</i><span>Четыре прибора</span></li>
+        <li><i>4</i><span>Кто когда говорит</span></li>
+      </ul>
+    </div>
+    <div class="grp">
+      <div class="gh">Часть II · приборы по отдельности</div>
+      <ul>
+        <li><i>5</i><span>Дофамин двигает, а не радует</span></li>
+        <li><i>6</i><span>Дегустатор помещается в горошину</span></li>
+        <li><i>7</i><span>Приятное бывает трёх разных сортов</span></li>
+        <li><i>8</i><span>Что именно считается «сработавшим»</span></li>
+        <li><i>9</i><span>Настроение — это отчёт Охотника</span></li>
+      </ul>
+    </div>
+    <div class="grp">
+      <div class="gh">Часть III · применение и границы</div>
+      <ul>
+        <li><i>10</i><span>Кто зарабатывает на этой путанице</span></li>
+        <li><i>11</i><span>Что знаем, а что я придумал</span></li>
+        <li><i>12</i><span>Развенчанное</span></li>
+        <li><i>—</i><span>Домашнее задание · что запомнить · источники</span></li>
+      </ul>
+    </div>
+  </section>
+
+
+  <div class="partbar wide">
+    <div class="pn">Часть I</div>
+    <div class="pt">Карта: одно событие и четыре разные вещи внутри него</div>
+  </div>
+
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">С чего начнём</div>
+      <div class="eyebrow">Шаг 1 · с чего начнём</div>
       <h2>Ваше утро, разобранное на части</h2>
     </div>
 
@@ -329,7 +380,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Рабочая метафора</div>
+      <div class="eyebrow">Шаг 2 · метафора для запоминания</div>
       <h2>Три работника и одно табло</h2>
     </div>
 
@@ -369,7 +420,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Рабочий инструмент курса</div>
+      <div class="eyebrow">Шаг 3 · та же карта без метафоры</div>
       <h2>Четыре прибора</h2>
     </div>
 
@@ -417,7 +468,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Схема</div>
+      <div class="eyebrow">Шаг 4 · схема одного эпизода</div>
       <h2>Кто когда говорит</h2>
     </div>
 
@@ -473,9 +524,14 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
     </figure>
   </section>
 
+  <div class="partbar wide">
+    <div class="pn">Часть II</div>
+    <div class="pt">Приборы по отдельности: доказательства и что внутри каждого</div>
+  </div>
+
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Правило номер один</div>
+      <div class="eyebrow">Шаг 5 · доказательство, что тяга и удовольствие разные</div>
       <h2>Дофамин двигает, а не радует</h2>
     </div>
 
@@ -578,7 +634,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Тогда кто</div>
+      <div class="eyebrow">Шаг 6 · где сидит удовольствие</div>
       <h2>Дегустатор помещается в горошину</h2>
     </div>
 
@@ -628,7 +684,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Разбор вашего вопроса</div>
+      <div class="eyebrow">Шаг 7 · зум внутрь «нравится»</div>
       <h2>Приятное бывает трёх разных сортов</h2>
     </div>
 
@@ -699,7 +755,73 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Ловушка, на которой ошибаются чаще всего</div>
+      <div class="eyebrow">Шаг 8 · прибор «учиться»</div>
+      <h2>Что именно считается «сработавшим»</h2>
+    </div>
+
+    <p>Наивное чтение: «сработавшее» — это то, что дало хороший результат. Оно неверно, и ошибка тут содержательная.</p>
+
+    <div class="callout wide">
+      <div class="lead">Система не регистрирует результаты. Она регистрирует ошибки в своих же предсказаниях.</div>
+      <p>Учит не «было хорошо», а «вышло не так, как я предсказывал». Из этого следует всё остальное — и почти всё контринтуитивно.</p>
+    </div>
+
+    <div class="evidence wide">
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Дофаминовые нейроны реагируют на разницу с ожиданием, а не на награду</div>
+          <span class="chip chip--learn">Прибор: учиться</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Активность отдельных дофаминовых нейронов среднего мозга, электродами, во время получения капли сока и во время сигналов, которые сок предвещают.</dd>
+          <dt>На ком</dt>
+          <dd>Обезьяны. Одиночные клетки, отклик в масштабе десятых долей секунды.</dd>
+          <dt>Что вышло</dt>
+          <dd>Нейроны <b>активируются</b> на события лучше предсказанного. <b>Не реагируют вовсе</b> на события ровно такие, как предсказано. И <b>тормозятся</b> на события хуже предсказанного. Отдельно: по мере обучения отклик <b>переезжает</b> с самой награды на сигнал, который её предвещает.</dd>
+          <dt>Воспроизвели</dt>
+          <dd>Да, это одна из самых воспроизводимых находок в области, на разных видах и разными методами.</dd>
+        </dl>
+        <div class="src">Schultz, 1998, J Neurophysiol 80:1–27 · Schultz, Dayan &amp; Montague, 1997, Science 275:1593–1599</div>
+      </div>
+    </div>
+
+    <p>Отсюда четыре следствия. Первые два вы уже встречали, не зная названия.</p>
+
+    <p><b>Первое. Полностью предсказанное не учит вообще.</b> Не «учит меньше» — не учит. Ошибка ноль, обновлять нечего. Это и есть ответ про вторую девушку: «я был уверен, что даст» означает, что обучающего сигнала в финале не было ни капли.</p>
+
+    <p><b>Второе. Сигнал переезжает на предвестие.</b> Как только звонок надёжно предсказывает еду, разряд идёт на звонок, а на саму еду — уже нет. Значит «сработавшим» помечается <strong>не награда, а самое раннее надёжное её предвестие.</strong></p>
+
+    <div class="mine wide">
+      <div class="who">Ваш случай · что помечается в цикле с лайками</div>
+      <p>Если облегчение приходит на <b>открытии приложения</b> — до всякого матча и до всякого ответа, — то по этому правилу «сработавшим» помечается именно открытие приложения. Не матч.</p>
+      <p>Это объясняет форму, которую вы описали: тянет открыть, а что там будет — уже почти неважно. Обучающий сигнал давно переехал на первый шаг цепочки.</p>
+      <div class="read">ПРИДУМАЛ: перенос правила «сигнал переезжает на предвестие» на ваш цикл — мой вывод, а не измерение. Проверяется тем же журналом: если тянет именно открыть, а не получить, — версия держится.</div>
+    </div>
+
+    <p><b>Третье, и оно самое неожиданное. Сигнал не знает, ЧТО сработало.</b></p>
+
+    <div class="note-row">
+      <p>Дословно из источника: дофаминовые нейроны «не различают разные награды» и рассылают «довольно общий» сигнал сразу на множество клеток. Это не адресная пометка «вот это действие было верным». Это широковещательное объявление: <em>только что вышло лучше ожидаемого</em>.</p>
+      <aside class="note">Задача «кто из недавно активных элементов это заслужил» называется распределением заслуги. Решается она приблизительно — по тому, что было активно незадолго до.</aside>
+    </div>
+
+    <p>Практическое следствие: <strong>система вполне может пометить как «сработавшее» не то, что реально сработало.</strong> Достаточно было оказаться активным незадолго до. Обстановка, время суток, поза, случайный жест, человек рядом — всё это может получить метку наравне с настоящей причиной.</p>
+
+    <p><b>Четвёртое. «Лучше ожидаемого» считается относительно вашей собственной планки.</b> Точку отсчёта задаёте вы. Одно и то же событие при разной планке даёт противоположный обучающий сигнал. Отсюда семь лет: событие обычное, планка семилетняя, сигнал отрицательный.</p>
+
+    <div class="callout wide">
+      <div class="lead">И самое неприятное следствие лично для вас.</div>
+      <p>Отсутствие ожидаемого плохого даёт <b>такой же положительный сигнал</b>, как награда — это измерено, шаг 7. Значит «ничего плохого не случилось» помечается как <b>сработавшее</b> и закрепляется точно так же.</p>
+      <p>Вот механизм, которым цикл с лайками учит сам себя, не давая при этом ни грамма удовольствия. Ему удовольствие и не нужно. Достаточно, чтобы на минуту стало не так пусто.</p>
+    </div>
+
+    <p><strong>Границы.</strong> Обезьяны, электроды, капля сока, доли секунды. И спор из шага 5 никуда не делся: школа Берриджа считает, что дофамин не учит, а тянет, и что часть обучения идёт без него. Обе стороны согласны в одном — сигнал устроен как <em>разница с ожиданием</em>, а не как оценка результата.</p>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Шаг 9 · зум внутрь «настроения»</div>
       <h2>Настроение — это отчёт Охотника, а не Дегустатора</h2>
     </div>
 
@@ -735,9 +857,14 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
     <p>Чего из этого <em>не</em> следует: что вкусная еда не вкуснее невкусной. Что удовольствие вообще устроено как «разница с ожиданием». Что размер награды не важен для удовольствия. Ни одного из этих утверждений эксперимент не проверял.</p>
   </section>
 
+  <div class="partbar wide">
+    <div class="pn">Часть III</div>
+    <div class="pt">Применение, границы и практика</div>
+  </div>
+
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Отдельный раздел, раз вам это нужно</div>
+      <div class="eyebrow">Шаг 10 · применение</div>
       <h2>Кто зарабатывает на этой путанице</h2>
     </div>
 
@@ -786,7 +913,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Обязательный раздел каждого урока</div>
+      <div class="eyebrow">Шаг 11 · границы знания</div>
       <h2>Что известно точно, а что я придумал</h2>
     </div>
 
@@ -827,7 +954,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Не строим на этом</div>
+      <div class="eyebrow">Шаг 12 · чего не строим</div>
       <h2>Развенчанное</h2>
     </div>
 

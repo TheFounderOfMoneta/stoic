@@ -279,6 +279,19 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 .figbox{position:relative}
 .figbadge{position:absolute;top:.7rem;right:.8rem;font-family:var(--mono);font-size:.63rem;letter-spacing:.11em;text-transform:uppercase;color:var(--learn);background:var(--learn-bg);padding:.22em .55em;border-radius:2px}
 .svg-tiny{font-family:var(--sans);font-size:10.5px}
+
+/* ---------- structure ---------- */
+.partbar{max-width:none;margin-top:3.6rem;padding-top:1.1rem;border-top:2px solid var(--ink);display:flex;flex-direction:column;gap:.28rem}
+.partbar .pn{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.partbar .pt{font-family:var(--serif);font-size:1.18rem;font-weight:600;line-height:1.25;max-width:var(--measure)}
+.partbar + .sec{margin-top:1.5rem}
+.toc{max-width:none;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:1.15rem}
+.toc > .eyebrow{color:var(--muted)}
+.toc .grp{display:flex;flex-direction:column;gap:.45rem}
+.toc .gh{font-family:var(--mono);font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;color:var(--want)}
+.toc ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.34rem}
+.toc li{display:grid;grid-template-columns:2.7rem minmax(0,1fr);gap:.5rem;font-size:.94rem;color:var(--ink-soft);max-width:var(--measure)}
+.toc li i{font-family:var(--mono);font-size:.74rem;color:var(--muted);font-style:normal;padding-top:.17rem}
 </style>
 </head>
 <body>
@@ -299,9 +312,51 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
     </ol>
   </section>
 
+  <section class="toc">
+    <div class="eyebrow">Из чего состоит урок</div>
+    <div class="grp">
+      <div class="gh">Часть I · как растёт тяга</div>
+      <ul>
+        <li><i>1</i><span>Подсказка тянет раньше еды</span></li>
+        <li><i>2</i><span>Зазывала становится громче</span></li>
+        <li><i>3</i><span>Что бывает, когда дофамин добавляют лекарством</span></li>
+      </ul>
+    </div>
+    <div class="grp">
+      <div class="gh">Часть II · две поправки</div>
+      <ul>
+        <li><i>4</i><span>Удовольствие не падает</span></li>
+        <li><i>5</i><span>У тяги нет потолка, у удовольствия есть</span></li>
+        <li><i>6</i><span>Тяга, от которой плохо</span></li>
+      </ul>
+    </div>
+    <div class="grp">
+      <div class="gh">Часть III · что кормит петлю</div>
+      <ul>
+        <li><i>7</i><span>Вердикт — это то, что учит</span></li>
+        <li><i>8</i><span>Как строят зазывалу</span></li>
+        <li><i>9</i><span>Теория и её слабые места</span></li>
+      </ul>
+    </div>
+    <div class="grp">
+      <div class="gh">Часть IV · границы и практика</div>
+      <ul>
+        <li><i>10</i><span>Что знаем, а что я придумал</span></li>
+        <li><i>11</i><span>Развенчанное</span></li>
+        <li><i>—</i><span>Домашнее задание · что запомнить · источники</span></li>
+      </ul>
+    </div>
+  </section>
+
+
+  <div class="partbar wide">
+    <div class="pn">Часть I</div>
+    <div class="pt">Как тяга запускается и как она растёт</div>
+  </div>
+
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Новая деталь механизма</div>
+      <div class="eyebrow">Шаг 1 · чем запускается тяга</div>
       <h2>Подсказка тянет раньше еды</h2>
     </div>
 
@@ -352,7 +407,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Главное этого урока</div>
+      <div class="eyebrow">Шаг 2 · что усиливается от повторения</div>
       <h2>Зазывала становится громче, кухня остаётся прежней</h2>
     </div>
 
@@ -372,7 +427,51 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Осторожно: тут почти все ошибаются</div>
+      <div class="eyebrow">Шаг 3 · доказательство на людях</div>
+      <h2>Что бывает, когда дофамин добавляют лекарством</h2>
+    </div>
+
+    <p>При болезни Паркинсона дофаминовых клеток не хватает, и часть лекарств прямо включает те приёмники, на которые обычно действует дофамин. У части таких пациентов начинается то, чего раньше не было: азартная игра, скупка вещей, резко выросшая сексуальная активность, приступы переедания.</p>
+
+    <div class="evidence wide">
+      <div class="ev">
+        <div class="ev-top">
+          <div class="claim">Лекарство, добавляющее дофамин, увеличивает шанс такого поведения в 2–3,5 раза</div>
+          <span class="chip chip--want">Прибор: хотеть</span>
+        </div>
+        <dl>
+          <dt>Что измерили</dt>
+          <dd>Наличие четырёх состояний по стандартным опросникам: проблемная игра, компульсивное сексуальное поведение, компульсивные покупки, приступообразное переедание.</dd>
+          <dt>На ком</dt>
+          <dd>3090 пациентов, 46 центров в США и Канаде. Важно: <b>оценивавшие не знали, какие лекарства человек принимает.</b></dd>
+          <dt>Что вышло</dt>
+          <dd>Хотя бы одно — у 13,6&nbsp;%. У принимающих агонист — <b>17,1&nbsp;% против 6,9&nbsp;%</b>. Разница одинакова для разных препаратов класса, значит дело в классе, а не в таблетке.</dd>
+          <dt>Границы</dt>
+          <dd>Это срез, а не наблюдение во времени: строго — связь, а не доказанная причина. Довод в пользу причины — поведение обычно уходит при отмене. И 13,6&nbsp;% это меньшинство: у большинства на тех же лекарствах ничего не происходит, значит дофамина одного <b>недостаточно</b>.</dd>
+        </dl>
+        <div class="src">Weintraub et al., 2010, Archives of Neurology 67:589–595</div>
+      </div>
+    </div>
+
+    <p><strong>Почему это самый сильный довод в курсе.</strong> Человеку меняют один параметр — количество дофаминового сигнала — и появляется мощная тяга к вещам, к которым её не было. Уберут лекарство — обычно уходит.</p>
+
+    <p>И заметьте, чего в описании нет. Ни одного сообщения о выросшей способности <em>наслаждаться</em>. Выросла тяга. Более того, у пациентов с таким поведением чаще отмечают <em>сниженную</em> способность получать удовольствие.</p>
+
+    <div class="callout wide">
+      <div class="lead">Главное для темы влияния: эти люди не чувствуют, что ими управляют.</div>
+      <p>Они чувствуют, что им хочется играть. Установленная извне тяга переживается изнутри как собственное желание — потому что она и есть собственное желание, просто с изменённой громкостью.</p>
+      <p>Отсюда общий вывод: <b>по ощущению «это моё» нельзя определить, откуда взялась тяга.</b> Ощущение авторства не является доказательством авторства.</p>
+    </div>
+  </section>
+
+  <div class="partbar wide">
+    <div class="pn">Часть II</div>
+    <div class="pt">Две поправки, без которых всё это читают неверно</div>
+  </div>
+
+  <section class="sec">
+    <div class="sec-head">
+      <div class="eyebrow">Шаг 4 · поправка первая</div>
       <h2>Удовольствие не падает. Это не про выгорание</h2>
     </div>
 
@@ -402,7 +501,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Ответ на ваш вопрос про семь лет</div>
+      <div class="eyebrow">Шаг 5 · поправка вторая, и ваши случаи</div>
       <h2>У тяги нет потолка. У удовольствия есть</h2>
     </div>
 
@@ -468,46 +567,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Самое сильное доказательство — и оно на людях</div>
-      <h2>Что бывает, когда дофамин добавляют лекарством</h2>
-    </div>
-
-    <p>При болезни Паркинсона дофаминовых клеток не хватает, и часть лекарств прямо включает те приёмники, на которые обычно действует дофамин. У части таких пациентов начинается то, чего раньше не было: азартная игра, скупка вещей, резко выросшая сексуальная активность, приступы переедания.</p>
-
-    <div class="evidence wide">
-      <div class="ev">
-        <div class="ev-top">
-          <div class="claim">Лекарство, добавляющее дофамин, увеличивает шанс такого поведения в 2–3,5 раза</div>
-          <span class="chip chip--want">Прибор: хотеть</span>
-        </div>
-        <dl>
-          <dt>Что измерили</dt>
-          <dd>Наличие четырёх состояний по стандартным опросникам: проблемная игра, компульсивное сексуальное поведение, компульсивные покупки, приступообразное переедание.</dd>
-          <dt>На ком</dt>
-          <dd>3090 пациентов, 46 центров в США и Канаде. Важно: <b>оценивавшие не знали, какие лекарства человек принимает.</b></dd>
-          <dt>Что вышло</dt>
-          <dd>Хотя бы одно — у 13,6&nbsp;%. У принимающих агонист — <b>17,1&nbsp;% против 6,9&nbsp;%</b>. Разница одинакова для разных препаратов класса, значит дело в классе, а не в таблетке.</dd>
-          <dt>Границы</dt>
-          <dd>Это срез, а не наблюдение во времени: строго — связь, а не доказанная причина. Довод в пользу причины — поведение обычно уходит при отмене. И 13,6&nbsp;% это меньшинство: у большинства на тех же лекарствах ничего не происходит, значит дофамина одного <b>недостаточно</b>.</dd>
-        </dl>
-        <div class="src">Weintraub et al., 2010, Archives of Neurology 67:589–595</div>
-      </div>
-    </div>
-
-    <p><strong>Почему это самый сильный довод в курсе.</strong> Человеку меняют один параметр — количество дофаминового сигнала — и появляется мощная тяга к вещам, к которым её не было. Уберут лекарство — обычно уходит.</p>
-
-    <p>И заметьте, чего в описании нет. Ни одного сообщения о выросшей способности <em>наслаждаться</em>. Выросла тяга. Более того, у пациентов с таким поведением чаще отмечают <em>сниженную</em> способность получать удовольствие.</p>
-
-    <div class="callout wide">
-      <div class="lead">Главное для темы влияния: эти люди не чувствуют, что ими управляют.</div>
-      <p>Они чувствуют, что им хочется играть. Установленная извне тяга переживается изнутри как собственное желание — потому что она и есть собственное желание, просто с изменённой громкостью.</p>
-      <p>Отсюда общий вывод: <b>по ощущению «это моё» нельзя определить, откуда взялась тяга.</b> Ощущение авторства не является доказательством авторства.</p>
-    </div>
-  </section>
-
-  <section class="sec">
-    <div class="sec-head">
-      <div class="eyebrow">Дыра в первой версии урока, которую вы нашли</div>
+      <div class="eyebrow">Шаг 6 · какой бывает тяга на ощупь</div>
       <h2>Тяга, от которой плохо</h2>
     </div>
 
@@ -539,9 +599,14 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
     <p>И отдельно про «не мой вариант»: это <strong>не отсутствие тяги</strong>, а результат работы Оценщика — он посчитал шанс и цену провала и выдал запрет. Тяга при этом никуда не делась: они в разных отделах и друг другу не подчиняются. Верна ли сама оценка — я не знаю и это не мой вопрос. Механически важно одно: в расчёт входит <b>ваше истолкование</b>, а не факт.</p>
   </section>
 
+  <div class="partbar wide">
+    <div class="pn">Часть III</div>
+    <div class="pt">Что кормит петлю дальше</div>
+  </div>
+
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Ваша догадка, и она верна</div>
+      <div class="eyebrow">Шаг 7 · чем закрывается эпизод</div>
       <h2>Вердикт — это то, что учит</h2>
     </div>
 
@@ -582,7 +647,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Отдельный раздел</div>
+      <div class="eyebrow">Шаг 8 · применение</div>
       <h2>Как строят зазывалу</h2>
     </div>
 
@@ -632,7 +697,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Как это называется и что в нём спорно</div>
+      <div class="eyebrow">Шаг 9 · как это называется и что в нём спорно</div>
       <h2>Теория и её слабые места</h2>
     </div>
 
@@ -667,9 +732,14 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
     </div>
   </section>
 
+  <div class="partbar wide">
+    <div class="pn">Часть IV</div>
+    <div class="pt">Границы и практика</div>
+  </div>
+
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Обязательный раздел</div>
+      <div class="eyebrow">Шаг 10 · границы знания</div>
       <h2>Что известно точно, а что я придумал</h2>
     </div>
 
@@ -709,7 +779,7 @@ figcaption{font-family:var(--mono);font-size:.73rem;line-height:1.55;color:var(-
 
   <section class="sec">
     <div class="sec-head">
-      <div class="eyebrow">Не строим на этом</div>
+      <div class="eyebrow">Шаг 11 · чего не строим</div>
       <h2>Развенчанное</h2>
     </div>
 
