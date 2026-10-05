@@ -15,7 +15,8 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QPainter
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSlider, QStackedWidget, QTableWidget, QTableWidgetItem,
+                               QProgressBar, QPushButton, QScrollArea, QSlider, QStackedWidget, QTableWidget,
+                               QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
 from .. import desktop, llm
@@ -222,14 +223,17 @@ class MainWindow(QMainWindow):
         app.status_changed.connect(self._on_status)
         app.history_changed.connect(self.refresh_history_views)
         app.mic_level.connect(self._on_mic_level)
+        app.llm_state_changed.connect(self._show_ai_state)
         self.llm_result.connect(self._on_llm_test)
         self._on_status(*app.engine_state)
+        self._show_ai_state(app.local_llm.state, app.local_llm.message, -1)
 
     def detach(self) -> None:
         """Отключиться от сигналов приложения перед пересозданием окна (смена темы)."""
         for signal, slot in ((self.app.status_changed, self._on_status),
                              (self.app.history_changed, self.refresh_history_views),
-                             (self.app.mic_level, self._on_mic_level)):
+                             (self.app.mic_level, self._on_mic_level),
+                             (self.app.llm_state_changed, self._show_ai_state)):
             try:
                 signal.disconnect(slot)
             except (RuntimeError, TypeError):
@@ -723,6 +727,24 @@ class MainWindow(QMainWindow):
         self._fill_mics()
         self.mic_combo.currentIndexChanged.connect(lambda i: s.set("audio.input_device", self.mic_combo.itemData(i)))
         basic.add_row("Микрофон", "", self.mic_combo)
+        self.ai_switch = bind_switch(s, "llm.correct", on_change=self._ai_toggled)
+        self.ai_row = basic.add_row("Улучшать текст с помощью ИИ",
+                                    "Локальная модель Qwen3.5 исправляет ошибки распознавания.", self.ai_switch)
+        self.ai_status = QLabel("")
+        self.ai_status.setObjectName("Muted")
+        self.ai_status.setWordWrap(True)
+        self.ai_progress = QProgressBar()
+        self.ai_progress.setRange(0, 1000)
+        self.ai_progress.setTextVisible(False)
+        self.ai_progress.setFixedHeight(4)
+        ai_box = QWidget()
+        ai_lay = QVBoxLayout(ai_box)
+        ai_lay.setContentsMargins(0, 0, 0, 10)
+        ai_lay.setSpacing(6)
+        ai_lay.addWidget(self.ai_status)
+        ai_lay.addWidget(self.ai_progress)
+        self.ai_box = ai_box
+        basic.rows.addWidget(ai_box)
         basic.add_row("Звуки", "Короткий сигнал в начале и в конце записи.", bind_switch(s, "audio.sounds"))
         basic.add_row("Капсула над доком", "Показывает, что Aqua готова или слушает.", bind_switch(s, "bubble.show"))
         basic.add_row("Запускать вместе с компьютером", "",
@@ -772,37 +794,67 @@ class MainWindow(QMainWindow):
                                                      ("clipboard", "Только скопировать")]))
         adv.addWidget(text)
 
-        ai = Section("ИИ-помощник", "правка выделенного текста голосом")
-        intro = QLabel("Выделите текст, удерживайте клавишу диктовки и скажите, что сделать: «сделай вежливее», "
-                       "«переведи на английский». Нужна программа Ollama или LM Studio на этом компьютере.")
-        intro.setObjectName("Muted")
-        intro.setWordWrap(True)
-        intro.setContentsMargins(0, 10, 0, 10)
-        ai.add_widget(intro)
-        ai.add_row("Включить", "", bind_switch(s, "llm.enabled"))
-        ai.add_row("Адрес", "Ollama: http://localhost:11434/v1", bind_line(s, "llm.base_url"))
-        mw = QWidget()
-        mrow = QHBoxLayout(mw)
-        mrow.setContentsMargins(0, 0, 0, 0)
-        mrow.setSpacing(8)
-        self.llm_model = QComboBox()
-        self.llm_model.setEditable(True)
-        self.llm_model.setMinimumWidth(220)
-        self.llm_model.setCurrentText(s.get("llm.model") or "")
-        self.llm_model.currentTextChanged.connect(lambda t: s.set("llm.model", t.strip()))
+        ai = Section("ИИ-помощник", "модель, правка выделенного голосом")
+        ai.add_row("Модель", "", bind_combo(s, "llm.provider", [
+            ("builtin", "Встроенная Qwen3.5-0.8B (llama.cpp)"), ("ollama", "Ollama (например qwen3.5:0.8b-local)"),
+            ("openai", "Другой сервер (OpenAI API)")], on_change=lambda _: self._update_ai_rows()))
+        self.ai_rows = {"builtin": [], "ollama": [], "openai": []}
+        self.ai_rows["builtin"].append(ai.add_row("Где запускать", "Видеокарта — быстрее всего.", bind_combo(
+            s, "llm.builtin_backend", [("auto", "Автоматически"), ("cuda", "Видеокарта (CUDA)"),
+                                       ("vulkan", "Видеокарта (Vulkan)"), ("cpu", "Процессор")])))
+        bw = QWidget()
+        brow = QHBoxLayout(bw)
+        brow.setContentsMargins(0, 8, 0, 8)
+        restart = QPushButton("Перезапустить ИИ")
+        restart.setCursor(Qt.PointingHandCursor)
+        restart.clicked.connect(lambda: (self.app.local_llm.stop(), self.app.install_llm()))
+        remove = QPushButton("Удалить модель")
+        remove.setObjectName("Danger")
+        remove.setCursor(Qt.PointingHandCursor)
+        remove.clicked.connect(self._ai_remove)
+        brow.addWidget(restart)
+        brow.addWidget(remove)
+        brow.addStretch(1)
+        self.ai_rows["builtin"].append(ai.add_widget(bw))
+        self.ai_rows["ollama"].append(ai.add_row("Адрес Ollama", "", bind_line(s, "llm.ollama_url")))
+        ow = QWidget()
+        orow = QHBoxLayout(ow)
+        orow.setContentsMargins(0, 0, 0, 0)
+        orow.setSpacing(8)
+        self.ollama_model = QComboBox()
+        self.ollama_model.setEditable(True)
+        self.ollama_model.setMinimumWidth(220)
+        self.ollama_model.setCurrentText(s.get("llm.ollama_model") or "")
+        self.ollama_model.currentTextChanged.connect(lambda t: s.set("llm.ollama_model", t.strip()))
+        refresh = QPushButton("↻")
+        refresh.setToolTip("Список моделей Ollama")
+        refresh.setCursor(Qt.PointingHandCursor)
+        refresh.clicked.connect(self._ollama_refresh)
+        orow.addWidget(self.ollama_model)
+        orow.addWidget(refresh)
+        self.ai_rows["ollama"].append(ai.add_row("Модель в Ollama", "", ow))
+        self.ai_rows["openai"].append(ai.add_row("Адрес сервера", "LM Studio: http://localhost:1234/v1",
+                                                 bind_line(s, "llm.base_url")))
+        self.ai_rows["openai"].append(ai.add_row("Модель на сервере", "", bind_line(s, "llm.model")))
+        tw = QWidget()
+        trow = QHBoxLayout(tw)
+        trow.setContentsMargins(0, 8, 0, 8)
         test = QPushButton("Проверить")
         test.setCursor(Qt.PointingHandCursor)
         test.clicked.connect(self._llm_test)
-        mrow.addWidget(self.llm_model)
-        mrow.addWidget(test)
-        ai.add_row("Модель", "", mw)
         self.llm_status = QLabel("")
         self.llm_status.setObjectName("Muted")
         self.llm_status.setWordWrap(True)
-        self.llm_status.setContentsMargins(0, 6, 0, 6)
-        ai.add_widget(self.llm_status)
+        trow.addWidget(test)
+        trow.addWidget(self.llm_status, 1)
+        ai.add_widget(tw)
+        ai.add_row("Сколько ждать ИИ", "Не успел — вставится текст без исправления.",
+                   bind_spin(s, "llm.correct_timeout_ms", 500, 8000, " мс", 250))
+        ai.add_row("Правка выделенного голосом", "Выделите текст, удерживайте клавишу диктовки и скажите, "
+                                                 "что сделать: «сделай вежливее», «переведи на английский».",
+                   bind_switch(s, "llm.enabled", on_change=self._ai_toggled))
         self.instr_edit = QPlainTextEdit(s.get("llm.instructions") or "")
-        self.instr_edit.setPlaceholderText("Ваши правила обычными словами, например: «пиши «ё», числа — цифрами»")
+        self.instr_edit.setPlaceholderText("Свои правила обычными словами, например: «пиши «ё», числа — цифрами»")
         self.instr_edit.setFixedHeight(80)
         self.instr_edit.textChanged.connect(lambda: s.set("llm.instructions", self.instr_edit.toPlainText()))
         holder = QWidget()
@@ -810,9 +862,8 @@ class MainWindow(QMainWindow):
         hl.setContentsMargins(0, 10, 0, 10)
         hl.addWidget(self.instr_edit)
         ai.add_widget(holder)
-        ai.add_row("Применять правила к каждой диктовке", "Немного медленнее.",
-                   bind_switch(s, "llm.use_for_dictation"))
         adv.addWidget(ai)
+        self._update_ai_rows()
 
         look = Section("Внешний вид", "тема, капсула")
         look.add_row("Тема", "", bind_combo(s, "ui.theme", [("auto", "Как в системе"), ("dark", "Тёмная"),
@@ -892,6 +943,84 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         return pg
 
+    # ------------------------------------------------------------- ИИ
+    def _update_ai_rows(self) -> None:
+        provider = self.app.corrector.provider()
+        for name, rows in getattr(self, "ai_rows", {}).items():
+            for row in rows:
+                row.setVisible(name == provider)
+        if provider == "ollama" and self.ollama_model.count() == 0:
+            self._ollama_refresh(silent=True)
+        self._show_ai_state(self.app.local_llm.state, self.app.local_llm.message, -1)
+
+    def _ollama_refresh(self, silent: bool = False) -> None:
+        from ..corrector import ollama_models
+        models = ollama_models(self.settings.get("llm.ollama_url") or "http://127.0.0.1:11434")
+        current = self.settings.get("llm.ollama_model") or ""
+        self.ollama_model.blockSignals(True)
+        self.ollama_model.clear()
+        self.ollama_model.addItems(models)
+        self.ollama_model.setCurrentText(current)
+        self.ollama_model.blockSignals(False)
+        if not silent:
+            self.llm_status.setText(f"Моделей в Ollama: {len(models)}" if models else "Ollama не отвечает")
+
+    def _ai_toggled(self, on: bool) -> None:
+        if not on or self.app.corrector.provider() != "builtin":
+            return
+        local = self.app.local_llm
+        if local.ready or local.state in ("installing", "starting"):
+            return
+        if not local.installed():
+            from ..corrector import ollama_models, pick_qwen_small
+            found = pick_qwen_small(ollama_models(self.settings.get("llm.ollama_url") or "http://127.0.0.1:11434"))
+            if found and QMessageBox.question(
+                    self, APP_NAME, f"У вас уже есть Ollama с моделью «{found}».\n\n"
+                    "Использовать её? Ничего скачивать не нужно.") == QMessageBox.Yes:
+                self.settings.set("llm.ollama_model", found)
+                self.settings.set("llm.provider", "ollama")
+                self.ollama_model.setCurrentText(found)
+                self._update_ai_rows()
+                return
+            answer = QMessageBox.question(
+                self, APP_NAME, "Скачать ИИ-модель Qwen3.5-0.8B (~0,9 ГБ) и движок llama.cpp (~0,5 ГБ)?\n\n"
+                "Это нужно один раз. Дальше всё работает без интернета.")
+            if answer != QMessageBox.Yes:
+                self.ai_switch.setChecked(False)
+                return
+        self.app.install_llm()
+
+    def _ai_remove(self) -> None:
+        if QMessageBox.question(self, APP_NAME, "Удалить ИИ-модель и движок с диска?") == QMessageBox.Yes:
+            self.settings.set("llm.correct", False)
+            self.settings.set("llm.enabled", False)
+            self.ai_switch.setChecked(False)
+            threading.Thread(target=self.app.local_llm.remove, daemon=True).start()
+
+    def _show_ai_state(self, state: str, message: str, progress: float) -> None:
+        if not hasattr(self, "ai_status"):
+            return
+        provider = self.app.corrector.provider()
+        builtin = provider == "builtin"
+        enabled = self.settings.get("llm.correct", False) or self.settings.get("llm.enabled", False)
+        text = {"ready": f"✓ Готово · {message}", "error": message,
+                "stopped": "Модель скачана — включится вместе с переключателем.",
+                "absent": ""}.get(state, message)
+        if provider == "ollama":
+            text = f"✓ Ollama · {self.settings.get('llm.ollama_model')}" if enabled else ""
+            state = "ready"
+        elif provider == "openai":
+            text = "Используется ваш сервер (Дополнительно → ИИ-помощник)." if enabled else ""
+            state = "ready"
+        elif not enabled and state in ("stopped", "absent"):
+            text = ""
+        self.ai_status.setText(text)
+        self.ai_status.setStyleSheet(f"color: {self.colors['danger']};" if state == "error" else "")
+        self.ai_progress.setVisible(builtin and state == "installing" and progress >= 0)
+        if progress >= 0:
+            self.ai_progress.setValue(int(progress * 1000))
+        self.ai_box.setVisible(bool(text) or self.ai_progress.isVisible())
+
     def _clear_history(self) -> None:
         if QMessageBox.question(self, APP_NAME, "Удалить всю историю и записи голоса?") == QMessageBox.Yes:
             self.app.history.clear()
@@ -922,7 +1051,8 @@ class MainWindow(QMainWindow):
 
         def work():
             try:
-                answer = llm.chat(settings, "Ответь одним словом.", "Скажи «готово».")
+                answer = llm.chat(settings, "Ответь одним словом.", "Скажи «готово».",
+                                  base_url=self.app.corrector.endpoint(), provider=self.app.corrector.provider())
                 self.llm_result.emit(f"✓ Работает. Ответ: {answer[:40]}", True)
             except Exception as exc:  # noqa: BLE001
                 self.llm_result.emit(f"Не удалось подключиться: {exc}", False)

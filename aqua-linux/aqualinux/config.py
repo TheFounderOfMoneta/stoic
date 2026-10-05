@@ -113,17 +113,25 @@ DEFAULTS: dict = {
         "demo_mode": False,            # подпись «Диктовка с Aqua Linux» для записи экрана
         "accent": "#3A8DFF",
     },
-    # --- Edit Mode и ИИ (необязательно, OpenAI-совместимый API) --------------
+    # --- ИИ: улучшение текста и Edit Mode ----------------------------------
     "llm": {
-        "enabled": False,
+        "provider": "builtin",         # builtin (Qwen3.5-0.8B через llama.cpp) | ollama | openai
+        "correct": False,              # улучшать распознанный текст
+        "correct_timeout_ms": 2500,    # не успела — вставляем исходный текст
+        "correct_min_words": 4,        # короткие фразы не трогаем
+        "enabled": False,              # Edit Mode (правка выделенного голосом)
+        "builtin_backend": "auto",     # auto | cuda | vulkan | cpu
+        "builtin_repo": "",            # свой репозиторий GGUF на Hugging Face (необязательно)
+        "builtin_quant": "Q4_K_M",
+        "ollama_url": "http://127.0.0.1:11434",
+        "ollama_model": "qwen3.5:0.8b-local",
         "base_url": "http://localhost:11434/v1",
         "api_key": "",
         "model": "qwen2.5:7b-instruct",
         "timeout_s": 15,
-        "use_for_dictation": False,    # применять инструкции к каждой диктовке
-        "use_context": False,          # Deep Context: название окна/приложения
+        "use_context": False,
         "instructions": "",
-        "app_styles": {},              # {"telegram": "Неформально, без точки в конце"}
+        "app_styles": {},
     },
     "edit_mode": {
         "enabled": True,               # выделили текст + клавиша = правка голосом

@@ -571,10 +571,16 @@ class Section(QFrame):
         return self.add_widget(SettingRow(title, description, control))
 
     def add_widget(self, widget: QWidget) -> QWidget:
-        self.rows.addWidget(divider())
-        self.rows.addWidget(widget)
+        """Строка вместе со своим разделителем — чтобы скрывать её целиком."""
+        wrap = QWidget()
+        lay = QVBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(divider())
+        lay.addWidget(widget)
+        self.rows.addWidget(wrap)
         self._count += 1
-        return widget
+        return wrap
 
 
 class Segmented(QWidget):

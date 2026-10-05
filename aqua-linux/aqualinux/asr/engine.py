@@ -75,8 +75,10 @@ class ASREngine:
     def __init__(self, settings: Settings,
                  on_status: Callable[[str, str], None],
                  on_partial: Callable[[int, str], None],
-                 on_final: Callable[[int, str, dict], None]):
+                 on_final: Callable[[int, str, dict], None],
+                 on_chunk: Optional[Callable[[int, int, str], None]] = None):
         self.settings = settings
+        self.on_chunk = on_chunk
         self.on_status = on_status
         self.on_partial = on_partial
         self.on_final = on_final
@@ -460,6 +462,8 @@ class ASREngine:
             sess.asr_seconds += time.perf_counter() - t0
             if text:
                 sess.texts.append(text)
+                if sess.sid >= 0 and self.on_chunk is not None:
+                    self.on_chunk(sess.sid, len(sess.texts) - 1, text)
         sess.commit_pos = cut
         sess.partial = ""
         if sess.sid >= 0:
@@ -508,6 +512,7 @@ class ASREngine:
             "device": self.device_label,
             "precision": self.precision,
             "audio": sess.flat(),
+            "chunks": list(sess.texts),
         }
         self._session = None
         self.on_final(sess.sid, final_text, info)

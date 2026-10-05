@@ -133,6 +133,24 @@ else
     warn "Веса не найдены — приложение скачает их при первом запуске (~0,9 ГБ) с CDN SberDevices"
 fi
 
+# ---------------------------------------------------------------- ИИ (Qwen3.5-0.8B)
+say "ИИ для улучшения текста (Qwen3.5-0.8B, локально)"
+OLLAMA_QWEN="$(curl -s -m 2 http://127.0.0.1:11434/api/tags 2>/dev/null | grep -oiE '"name":"qwen3\.5:[^"]*0\.8b[^"]*"' | head -n1 | cut -d'"' -f4 || true)"
+if [[ -n "$OLLAMA_QWEN" ]]; then
+    ok "Найдена Ollama с моделью $OLLAMA_QWEN"
+    if ask "Использовать её для улучшения текста?"; then
+        PYTHONPATH="$ROOT" "$PY" - "$OLLAMA_QWEN" <<'PYEOF'
+import sys
+from aqualinux.config import Settings
+s = Settings()
+s.set("llm.provider", "ollama"); s.set("llm.ollama_model", sys.argv[1]); s.set("llm.correct", True); s.set("llm.enabled", True)
+PYEOF
+        ok "Включено: Ollama · $OLLAMA_QWEN"
+    fi
+elif ask "Скачать встроенный ИИ (движок llama.cpp с CUDA + Qwen3.5-0.8B Q4_K_M, ~1 ГБ)?"; then
+    PYTHONPATH="$ROOT" "$PY" -m aqualinux.localllm install --enable || warn "ИИ не скачался — включите позже в Настройках"
+fi
+
 # ---------------------------------------------------------------- ярлыки
 say "Создаю ярлыки"
 mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR"

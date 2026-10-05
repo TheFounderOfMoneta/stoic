@@ -1,8 +1,8 @@
 """Необязательная ИИ-обработка через OpenAI-совместимый API (Ollama, LM Studio, llama.cpp…).
 
-Используется для «Инструкций» (стиль текста под приложение) и «Командного
-режима» (изменить выделенный текст голосом). Без настроенного сервера
-приложение полностью работает и так — GigaAM уже расставляет пунктуацию.
+Используется для Edit Mode (изменить выделенный текст голосом) — со встроенной
+моделью Qwen3.5-0.8B или со своим сервером (Ollama, LM Studio). Исправление
+распознанного текста — в corrector.py.
 """
 from __future__ import annotations
 
@@ -13,12 +13,6 @@ import urllib.request
 
 log = logging.getLogger(__name__)
 
-DICTATION_SYSTEM = (
-    "Ты — редактор диктовки. Тебе дают распознанную речь. Верни ТОЛЬКО итоговый текст для вставки, "
-    "без пояснений и кавычек. Сохраняй смысл и язык автора. Исправляй явные ошибки распознавания, "
-    "учитывай самопоправки («нет, точнее…» — оставь только исправленный вариант), убирай слова-паразиты, "
-    "оформляй перечисления списками, если автор явно перечисляет пункты. Ничего не добавляй от себя."
-)
 COMMAND_SYSTEM = (
     "Ты — помощник по редактированию текста. Пользователь голосом даёт команду. Если передан выделенный "
     "текст, примени команду к нему и верни ТОЛЬКО новый вариант текста. Если выделенного текста нет, "
@@ -30,30 +24,51 @@ class LLMError(RuntimeError):
     pass
 
 
-def chat(settings, system: str, user: str) -> str:
-    base = (settings.get("llm.base_url") or "").rstrip("/")
+# Рекомендации Qwen3.5 для текстовых задач без «размышлений» (профиль пользователя).
+SAMPLING = {"temperature": 1.0, "top_p": 1.0, "top_k": 20, "min_p": 0.0, "presence_penalty": 2.0,
+            "repeat_penalty": 1.0}
+STYLE = ("Отвечай на языке пользователя. По умолчанию отвечай по-русски. Пиши грамотно и естественно. "
+         "Строго соблюдай заданный формат, число пунктов и ограничения длины.")
+
+
+def chat(settings, system: str, user: str, base_url: str | None = None, provider: str = "openai") -> str:
+    """Один запрос к модели: builtin (llama-server), ollama (родной API) или openai-совместимый сервер."""
+    base = (base_url or settings.get("llm.base_url") or "").rstrip("/")
     if not base:
-        raise LLMError("Не указан адрес API")
-    payload = {
-        "model": settings.get("llm.model") or "",
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "temperature": 0.2,
-        "stream": False,
-    }
-    req = urllib.request.Request(f"{base}/chat/completions", data=json.dumps(payload).encode("utf-8"),
+        raise LLMError("ИИ не подключён")
+    messages = [{"role": "system", "content": f"{system}\n{STYLE}"}, {"role": "user", "content": user}]
+    if provider == "ollama":
+        url = f"{base}/api/chat"
+        payload = {"model": settings.get("llm.ollama_model") or "qwen3.5:0.8b-local", "messages": messages,
+                   "stream": False, "think": False, "keep_alive": -1,
+                   "options": {**SAMPLING, "num_ctx": 4096}}
+    else:
+        url = f"{base}/chat/completions"
+        payload = {"messages": messages, "stream": False, "temperature": SAMPLING["temperature"],
+                   "top_p": SAMPLING["top_p"], "presence_penalty": SAMPLING["presence_penalty"]}
+        if provider == "builtin":
+            payload.update({"model": "qwen", "top_k": SAMPLING["top_k"], "min_p": SAMPLING["min_p"],
+                            "repeat_penalty": SAMPLING["repeat_penalty"],
+                            "chat_template_kwargs": {"enable_thinking": False}})
+        else:
+            payload["model"] = settings.get("llm.model") or ""
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                  headers={"Content-Type": "application/json"})
     key = settings.get("llm.api_key")
-    if key:
+    if key and provider == "openai":
         req.add_header("Authorization", f"Bearer {key}")
     try:
-        with urllib.request.urlopen(req, timeout=float(settings.get("llm.timeout_s") or 12)) as resp:
+        with urllib.request.urlopen(req, timeout=float(settings.get("llm.timeout_s") or 15)) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise LLMError(f"HTTP {exc.code}: {exc.read()[:200]!r}") from exc
     except Exception as exc:  # noqa: BLE001
         raise LLMError(str(exc)) from exc
     try:
-        text = body["choices"][0]["message"]["content"]
+        if provider == "ollama":
+            text = body["message"]["content"]
+        else:
+            text = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"Неожиданный ответ: {str(body)[:200]}") from exc
     return _strip_fences(text).strip()
@@ -72,32 +87,8 @@ def _strip_fences(text: str) -> str:
     return text
 
 
-def _app_style(settings, app: str) -> str:
-    styles = settings.get("llm.app_styles") or {}
-    app_l = (app or "").lower()
-    for key, style in styles.items():
-        if key and key.lower() in app_l:
-            return style
-    return ""
-
-
-def polish_dictation(settings, text: str, app: str, title: str, vocabulary: list[str]) -> str:
-    parts = []
-    instructions = (settings.get("llm.instructions") or "").strip()
-    if instructions:
-        parts.append(f"Инструкции пользователя:\n{instructions}")
-    style = _app_style(settings, app)
-    if style:
-        parts.append(f"Стиль для этого приложения:\n{style}")
-    if settings.get("llm.use_context", True) and (app or title):
-        parts.append(f"Текст вставляется в приложение «{app}», окно «{title}».")
-    if vocabulary:
-        parts.append("Словарь (пиши эти слова именно так): " + ", ".join(vocabulary[:200]))
-    parts.append(f"Распознанная речь:\n{text}")
-    return chat(settings, DICTATION_SYSTEM, "\n\n".join(parts))
-
-
-def run_command(settings, command: str, selection: str, app: str, title: str) -> str:
+def run_command(settings, command: str, selection: str, app: str, title: str,
+                base_url: str | None = None, provider: str = "openai") -> str:
     parts = [f"Команда: {command}"]
     if selection.strip():
         parts.append(f"Выделенный текст:\n<<<\n{selection}\n>>>")
@@ -106,7 +97,7 @@ def run_command(settings, command: str, selection: str, app: str, title: str) ->
     instructions = (settings.get("llm.instructions") or "").strip()
     if instructions:
         parts.append(f"Общие предпочтения пользователя:\n{instructions}")
-    return chat(settings, COMMAND_SYSTEM, "\n\n".join(parts))
+    return chat(settings, COMMAND_SYSTEM, "\n\n".join(parts), base_url, provider)
 
 
 def list_models(settings) -> list[str]:

@@ -13,9 +13,11 @@ from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
 
 from . import llm
-from .asr.engine import ASREngine
+from .asr.engine import ASREngine, join_texts
 from .audio import Recorder, SoundPlayer, audio_backend_error
 from .config import APP_ID, Settings
+from .corrector import Corrector
+from .localllm import LocalLLM
 from .hotkeys import (MODIFIER_GENERIC, MODIFIER_TOKENS, HotkeyRecorder, KeyState, SelectionTracker,
                       X11Grabber, X11KeyListener, pretty_combo, read_x_selection)
 from .inserter import X11Desktop, WindowInfo, xdotool_type
@@ -49,12 +51,16 @@ class App(QObject):
     sig_final = Signal(int, str, object)
     sig_llm = Signal(int, str, str)
     sig_retranscribed = Signal(int, str)
+    sig_chunk = Signal(int, int, str)
+    sig_corrected = Signal(int, str)
+    sig_llm_state = Signal(str, str, float)
     # Для окна настроек
     status_changed = Signal(str, str)
     history_changed = Signal()
     hotkey_captured = Signal(list, bool)    # (сочетание, окончательно)
     mic_level = Signal(float)
     activate_seen = Signal()
+    llm_state_changed = Signal(str, str, float)
 
     def __init__(self, qapp: QApplication, settings: Settings):
         super().__init__()
@@ -75,7 +81,11 @@ class App(QObject):
         self.listener: Optional[X11KeyListener] = None
         self.selection = SelectionTracker()
 
-        self.engine = ASREngine(settings, self.sig_status.emit, self.sig_partial.emit, self.sig_final.emit)
+        self.engine = ASREngine(settings, self.sig_status.emit, self.sig_partial.emit, self.sig_final.emit,
+                                self.sig_chunk.emit)
+        self.local_llm = LocalLLM(settings, self.sig_llm_state.emit)
+        self.corrector = Corrector(settings, self.local_llm)
+        self.corrector.vocabulary = self.processor.vocabulary()
         self.recorder = Recorder(self._on_audio, self.sig_level.emit)
         self.engine_state = ("loading", "Загрузка…")
 
@@ -105,6 +115,9 @@ class App(QObject):
         self.sig_final.connect(self._on_final)
         self.sig_llm.connect(self._on_llm)
         self.sig_retranscribed.connect(self._on_retranscribed)
+        self.sig_chunk.connect(self._on_chunk)
+        self.sig_corrected.connect(self._on_corrected)
+        self.sig_llm_state.connect(self._on_llm_state)
         self._retranscribe_callbacks: dict[int, object] = {}
         self.settings.on_change(self._on_setting)
 
@@ -137,6 +150,7 @@ class App(QObject):
             self.bubble.show()
             self.bubble._kick()
         self.engine.start()
+        QTimer.singleShot(1500, self._maybe_start_llm)
         if self.settings.get("audio.keep_mic_warm"):
             self.recorder.set_warm(True, self.settings.get("audio.input_device"))
         self._start_ipc()
@@ -157,6 +171,7 @@ class App(QObject):
                      lambda: self.listener and self.listener.stop(),
                      lambda: self.grabber and self.grabber.ungrab_all(),
                      self.engine.shutdown,
+                     self.local_llm.stop,
                      lambda: self.recorder.set_warm(False),
                      self.sysaudio.end):
             try:
@@ -173,6 +188,8 @@ class App(QObject):
     def reload_dictionary(self) -> None:
         self.processor.load(self.dictionary.data.get("terms", []),
                             self.replacements.data.get("replacements", []))
+        if hasattr(self, "corrector"):
+            self.corrector.vocabulary = self.processor.vocabulary()
 
     # ================================================================ IPC
     def _start_ipc(self) -> None:
@@ -449,6 +466,7 @@ class App(QObject):
         sess = self.session
         if sess is not None:
             self.engine.cancel(sess.sid)
+            self.corrector.forget(sess.sid)
         self.recorder.stop()
         self.sysaudio.end()
         self._grab_cancel(False)
@@ -499,6 +517,31 @@ class App(QObject):
             self._end_session()
             self.bubble.show_message("Речь не распознана", "warn", 1800)
             return
+        sess.info = info
+        sess.raw = text
+        chunks = info.get("chunks") or [text]
+        if sess.kind != "edit" and self.corrector.active():
+            # Куски, зафиксированные во время речи, уже исправляются — ждём только хвост.
+            deadline = int(self.settings.get("llm.correct_timeout_ms", 2500) or 2500) / 1000 + 0.6
+
+            def work():
+                parts = self.corrector.collect(sid, chunks, deadline)
+                self.sig_corrected.emit(sid, join_texts(parts))
+
+            threading.Thread(target=work, name="correct", daemon=True).start()
+        else:
+            self.corrector.forget(sid)
+            self._after_correction(sess, text)
+
+    @Slot(int, str)
+    def _on_corrected(self, sid: int, text: str) -> None:
+        sess = self.session
+        if sess is None or sess.sid != sid or self.phase != "processing":
+            return
+        sess.ai = text.strip() != (sess.raw or "").strip()
+        self._after_correction(sess, text)
+
+    def _after_correction(self, sess: Session, text: str) -> None:
         processed = self.processor.process(text, self.settings)
         send = False
         if sess.mode == "hands_free" and self.settings.get("insert.send_it", True):
@@ -506,28 +549,61 @@ class App(QObject):
         if self.settings.get("text.casual_messaging", False) and sess.kind != "edit" \
                 and is_messenger(sess.window.wm_class, sess.window.title):
             processed = casual(processed)
-        sess.info = info
-        sess.raw = text
         sess.send = send
-        use_llm = self.settings.get("llm.enabled", False)
-        if sess.kind == "edit" and use_llm:
+        if sess.kind == "edit" and self.settings.get("llm.enabled", False) and self._llm_endpoint():
             self._run_llm(sess, "command", processed)
-        elif use_llm and self.settings.get("llm.use_for_dictation", False) and processed:
-            self._run_llm(sess, "polish", processed)
         else:
-            self._deliver(sess, processed)
+            self._deliver(sess, processed, ai=getattr(sess, "ai", False))
+
+    @Slot(int, int, str)
+    def _on_chunk(self, sid: int, index: int, text: str) -> None:
+        sess = self.session
+        if sess is not None and sess.sid == sid and sess.kind != "edit" and self.corrector.active():
+            self.corrector.submit(sid, index, text)
+
+    # ---------------------------------------------------------------- ИИ
+    def _llm_endpoint(self) -> str | None:
+        return self.corrector.endpoint()
+
+    def _maybe_start_llm(self) -> None:
+        wanted = self.settings.get("llm.correct", False) or self.settings.get("llm.enabled", False)
+        provider = self.corrector.provider()
+        if provider != "builtin":
+            self.local_llm.stop()
+            if wanted:
+                # Ollama: загрузить модель в память заранее (keep_alive -1) и прогреть кэш промпта.
+                threading.Thread(target=self.corrector.warmup, name="llm-warmup", daemon=True).start()
+                self.llm_state_changed.emit("ready" if provider == "ollama" else "external",
+                                            f"Ollama · {self.settings.get('llm.ollama_model')}"
+                                            if provider == "ollama" else "свой сервер", -1)
+            return
+        if wanted and self.local_llm.installed():
+            self.local_llm.start_async()
+        elif not wanted:
+            self.local_llm.stop()
+
+    def install_llm(self) -> None:
+        """Скачать (если нужно) и запустить встроенную модель — из настроек."""
+        self.local_llm.start_async()
+
+    @Slot(str, str, float)
+    def _on_llm_state(self, state: str, message: str, progress: float) -> None:
+        self.llm_state_changed.emit(state, message, progress)
+        if state == "ready":
+            threading.Thread(target=self.corrector.warmup, name="llm-warmup", daemon=True).start()
+        if state == "error":
+            self.bubble.show_message("ИИ не запустился — текст вставляется без исправления", "warn", 4000)
 
     def _run_llm(self, sess: Session, kind: str, text: str) -> None:
-        self.bubble.set_live_text("✨ " + ("Правлю выделенный текст…" if kind == "command" else "Оформляю текст…"))
+        self.bubble.set_live_text("✨ Правлю выделенный текст…")
         settings = self.settings
-        vocab = self.processor.vocabulary()
+        base = self._llm_endpoint()
+        provider = self.corrector.provider()
 
         def work():
             try:
-                if kind == "command":
-                    result = llm.run_command(settings, text, sess.selection, sess.window.app, sess.window.title)
-                else:
-                    result = llm.polish_dictation(settings, text, sess.window.app, sess.window.title, vocab)
+                result = llm.run_command(settings, text, sess.selection, sess.window.app, sess.window.title,
+                                         base_url=base, provider=provider)
                 self.sig_llm.emit(sess.sid, result, "")
             except Exception as exc:  # noqa: BLE001
                 log.warning("ИИ-обработка не удалась: %s", exc)
@@ -698,6 +774,11 @@ class App(QObject):
                 self.recorder.set_warm(True, self.settings.get("audio.input_device"))
         elif key in ("asr.device", "asr.precision", "asr.model_dir", "asr.cpu_threads"):
             self.engine.reload()
+        elif key in ("llm.correct", "llm.enabled", "llm.provider", "llm.ollama_model", "llm.ollama_url"):
+            QTimer.singleShot(0, self._maybe_start_llm)
+        elif key == "llm.builtin_backend":
+            self.local_llm.stop()
+            QTimer.singleShot(0, self._maybe_start_llm)
 
     def begin_hotkey_capture(self) -> None:
         self.hotkey_recorder.begin(lambda combo: self.hotkey_captured.emit(list(combo), False),

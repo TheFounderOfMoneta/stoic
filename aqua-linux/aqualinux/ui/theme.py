@@ -264,6 +264,8 @@ QPushButton#Help:hover {{ background: {c['accent']}; color: white; }}
 #Banner {{ background: {c['accent_soft']}; border-radius: 12px; padding: 10px 14px; color: {c['text']}; }}
 #BannerError {{ background: rgba(255, 95, 87, 36); border-radius: 12px; padding: 10px 14px; color: {c['text']}; }}
 #Big {{ font-size: 12pt; }}
+QProgressBar {{ background: {c['switch_off']}; border: none; border-radius: 2px; }}
+QProgressBar::chunk {{ background: {c['accent']}; border-radius: 2px; }}
 """
 
 
