@@ -1,0 +1,13 @@
+# PyTorch ставится отдельно (install.sh): torch==2.6.0 torchaudio==2.6.0 с индекса cu124.
+# silero-vad ставится с --no-deps, чтобы pip не тянул второй torch.
+PySide6-Essentials>=6.7
+sounddevice>=0.4.6
+python-xlib>=0.33
+numpy>=1.26
+hydra-core==1.3.*
+omegaconf==2.3.*
+antlr4-python3-runtime==4.9.3
+sentencepiece>=0.2
+soundfile>=0.12
+tqdm
+packaging
