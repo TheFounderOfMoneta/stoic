@@ -103,8 +103,8 @@ else
     fi
 fi
 
-say "Ставлю зависимости приложения"
-"$PY" -m pip install -q -r "$ROOT/requirements.txt"
+say "Ставлю зависимости приложения (PySide6 ~100 МБ, пара минут)"
+"$PY" -m pip install --progress-bar on -r "$ROOT/requirements.txt"
 "$PY" -m pip install -q --no-deps "silero-vad==6.2.3"
 ok "Зависимости установлены"
 
