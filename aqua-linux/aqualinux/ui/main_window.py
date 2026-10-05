@@ -183,6 +183,7 @@ class HistoryItem(QFrame):
 
 class MainWindow(QMainWindow):
     llm_result = Signal(str, bool)
+    ds_result = Signal(str, bool, object)
 
     def __init__(self, app):
         super().__init__()
@@ -224,7 +225,10 @@ class MainWindow(QMainWindow):
         app.history_changed.connect(self.refresh_history_views)
         app.mic_level.connect(self._on_mic_level)
         app.llm_state_changed.connect(self._show_ai_state)
+        app.notices_changed.connect(self._render_notices)
         self.llm_result.connect(self._on_llm_test)
+        self.ds_result.connect(self._on_ds_test)
+        self._render_notices()
         self._on_status(*app.engine_state)
         self._show_ai_state(app.local_llm.state, app.local_llm.message, -1)
 
@@ -233,7 +237,8 @@ class MainWindow(QMainWindow):
         for signal, slot in ((self.app.status_changed, self._on_status),
                              (self.app.history_changed, self.refresh_history_views),
                              (self.app.mic_level, self._on_mic_level),
-                             (self.app.llm_state_changed, self._show_ai_state)):
+                             (self.app.llm_state_changed, self._show_ai_state),
+                             (self.app.notices_changed, self._render_notices)):
             try:
                 signal.disconnect(slot)
             except (RuntimeError, TypeError):
@@ -307,6 +312,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.pages[key].area)
         if key in ("home", "history"):
             self.refresh_history_views()
+        if key == "settings" and hasattr(self, "mic_combo"):
+            self._fill_mics()
         self.show()
         self.raise_()
         self.activateWindow()
@@ -424,6 +431,13 @@ class MainWindow(QMainWindow):
         self.banner.setWordWrap(True)
         self.banner.hide()
         lay.addWidget(self.banner)
+        # Важные предупреждения с кнопкой «исправить»: видеопамять, перегруз микрофона, DeepSeek.
+        self.notice_holder = QWidget()
+        self.notice_lay = QVBoxLayout(self.notice_holder)
+        self.notice_lay.setContentsMargins(0, 0, 0, 0)
+        self.notice_lay.setSpacing(10)
+        self.notice_holder.hide()
+        lay.addWidget(self.notice_holder)
 
         self.try_card = Card("Попробуйте здесь", padding=18)
         self.try_box = QPlainTextEdit()
@@ -729,7 +743,8 @@ class MainWindow(QMainWindow):
         basic.add_row("Микрофон", "", self.mic_combo)
         self.ai_switch = bind_switch(s, "llm.correct", on_change=self._ai_toggled)
         self.ai_row = basic.add_row("Улучшать текст с помощью ИИ",
-                                    "Локальная модель Qwen3.5 исправляет ошибки распознавания.", self.ai_switch)
+                                    "DeepSeek (по ключу) исправляет ошибки распознавания, без интернета — "
+                                    "локальная Qwen3.5.", self.ai_switch)
         self.ai_status = QLabel("")
         self.ai_status.setObjectName("Muted")
         self.ai_status.setWordWrap(True)
@@ -767,11 +782,12 @@ class MainWindow(QMainWindow):
             editor = HotkeyEditor(self.app, key)
             self.hotkey_editors.append(editor)
             keys.add_row(title, desc, editor)
-        keys.add_row("Двойное нажатие — без удержания", "Дважды нажмите клавишу диктовки, чтобы говорить "
-                                                       "не держа её.", bind_switch(s, "hotkeys.double_tap_hands_free"))
+        keys.add_row("Короткое нажатие — длинная запись", "Коротко нажмите клавишу диктовки — можно говорить, "
+                                                         "не держа её. Нажмите ещё раз — текст вставится.",
+                     bind_switch(s, "hotkeys.double_tap_hands_free"))
         keys.add_row("Не открывать меню по Alt", "Чтобы Alt не открывал меню в Firefox и других программах.",
                      bind_switch(s, "hotkeys.neutralize_modifier"))
-        keys.add_row("Чувствительность нажатия", "Нажатие короче — не считается.",
+        keys.add_row("Короткое нажатие — до", "Дольше — это уже удержание (говорите, пока держите).",
                      bind_spin(s, "hotkeys.tap_threshold_ms", 120, 800, " мс", 20))
         adv.addWidget(keys)
 
@@ -785,6 +801,10 @@ class MainWindow(QMainWindow):
         text.add_row("«Отправь» отправляет сообщение", "Скажите «Отправь.» в конце — нажмётся Enter.",
                      bind_switch(s, "insert.send_it"))
         text.add_row("Убирать «э-э», «мм»", "", bind_switch(s, "text.remove_fillers"))
+        text.add_row("Числа цифрами", "«номер один» → «№ 1», «двадцать пять» → «25».",
+                     bind_switch(s, "text.numbers"))
+        text.add_row("Как писать номер", "", bind_combo(s, "text.number_style", [("sign", "№ 5"),
+                                                                               ("word", "номер 5")]))
         text.add_row("«Новая строка», «новый абзац»", "Голосом делать переносы.",
                      bind_switch(s, "text.voice_commands"))
         text.add_row("Неформально в мессенджерах", "В Telegram и т.п. — с маленькой буквы и без точки.",
@@ -794,10 +814,45 @@ class MainWindow(QMainWindow):
                                                      ("clipboard", "Только скопировать")]))
         adv.addWidget(text)
 
-        ai = Section("ИИ-помощник", "модель, правка выделенного голосом")
-        ai.add_row("Модель", "", bind_combo(s, "llm.provider", [
-            ("builtin", "Встроенная Qwen3.5-0.8B (llama.cpp)"), ("ollama", "Ollama (например qwen3.5:0.8b-local)"),
-            ("openai", "Другой сервер (OpenAI API)")], on_change=lambda _: self._update_ai_rows()))
+        ai = Section("ИИ-помощник", "DeepSeek, запасная модель, правка выделенного голосом")
+        self.ai_section = ai
+        ai.add_row("DeepSeek — основной ИИ", "Быстро, качественно и дёшево; видеокарта не нужна. "
+                                             "Нужен интернет и ключ API.", bind_switch(s, "llm.cloud"))
+        kw = QWidget()
+        krow = QHBoxLayout(kw)
+        krow.setContentsMargins(0, 0, 0, 0)
+        krow.setSpacing(8)
+        self.ds_key = bind_line(s, "llm.deepseek_key", "sk-…", password=True)
+        self.ds_key.setMinimumWidth(240)
+        self.ds_key.editingFinished.connect(lambda: self._show_ai_state(self.app.local_llm.state,
+                                                                        self.app.local_llm.message, -1))
+        ds_test = QPushButton("Проверить")
+        ds_test.setCursor(Qt.PointingHandCursor)
+        ds_test.clicked.connect(self._deepseek_test)
+        krow.addWidget(self.ds_key, 1)
+        krow.addWidget(ds_test)
+        ai.add_row("Ключ DeepSeek API", "platform.deepseek.com → API keys. Хранится только на этом компьютере.", kw)
+        self.ds_model = QComboBox()
+        self.ds_model.setEditable(True)
+        self.ds_model.setMinimumWidth(220)
+        self.ds_model.addItems(llm.DEEPSEEK_MODELS)
+        self.ds_model.setCurrentText(s.get("llm.deepseek_model") or llm.DEEPSEEK_MODELS[0])
+        self.ds_model.currentTextChanged.connect(lambda t: s.set("llm.deepseek_model", t.strip()))
+        ai.add_row("Модель DeepSeek", "Flash без «размышлений» — самая быстрая.", self.ds_model)
+        self.ds_status = QLabel("")
+        self.ds_status.setObjectName("Muted")
+        self.ds_status.setWordWrap(True)
+        self.ds_status.setContentsMargins(0, 4, 0, 8)
+        self.ds_status_row = ai.add_widget(self.ds_status)
+        self.ds_status_row.hide()
+        ai.add_row("Сколько ждать DeepSeek", "Не ответил — запасная модель или текст без исправления.",
+                   bind_spin(s, "llm.cloud_timeout_ms", 1000, 15000, " мс", 500))
+
+        ai.add_row("Запасная модель", "Работает без интернета, если DeepSeek недоступен.",
+                   bind_combo(s, "llm.provider", [
+                       ("builtin", "Встроенная Qwen3.5-0.8B (llama.cpp)"),
+                       ("ollama", "Ollama (например qwen3.5:0.8b-local)"),
+                       ("openai", "Другой сервер (OpenAI API)")], on_change=lambda _: self._update_ai_rows()))
         self.ai_rows = {"builtin": [], "ollama": [], "openai": []}
         self.ai_rows["builtin"].append(ai.add_row("Где запускать", "Видеокарта — быстрее всего.", bind_combo(
             s, "llm.builtin_backend", [("auto", "Автоматически"), ("cuda", "Видеокарта (CUDA)"),
@@ -805,7 +860,7 @@ class MainWindow(QMainWindow):
         bw = QWidget()
         brow = QHBoxLayout(bw)
         brow.setContentsMargins(0, 8, 0, 8)
-        restart = QPushButton("Перезапустить ИИ")
+        restart = QPushButton("Скачать / запустить")
         restart.setCursor(Qt.PointingHandCursor)
         restart.clicked.connect(lambda: (self.app.local_llm.stop(), self.app.install_llm()))
         remove = QPushButton("Удалить модель")
@@ -839,7 +894,7 @@ class MainWindow(QMainWindow):
         tw = QWidget()
         trow = QHBoxLayout(tw)
         trow.setContentsMargins(0, 8, 0, 8)
-        test = QPushButton("Проверить")
+        test = QPushButton("Проверить запасную")
         test.setCursor(Qt.PointingHandCursor)
         test.clicked.connect(self._llm_test)
         self.llm_status = QLabel("")
@@ -848,13 +903,13 @@ class MainWindow(QMainWindow):
         trow.addWidget(test)
         trow.addWidget(self.llm_status, 1)
         ai.add_widget(tw)
-        ai.add_row("Сколько ждать ИИ", "Не успел — вставится текст без исправления.",
+        ai.add_row("Сколько ждать запасную", "Не успела — вставится текст без исправления.",
                    bind_spin(s, "llm.correct_timeout_ms", 500, 8000, " мс", 250))
         ai.add_row("Правка выделенного голосом", "Выделите текст, удерживайте клавишу диктовки и скажите, "
-                                                 "что сделать: «сделай вежливее», «переведи на английский».",
+                                                 "что сделать: «сократи», «сделай вежливее», «переведи на английский».",
                    bind_switch(s, "llm.enabled", on_change=self._ai_toggled))
         self.instr_edit = QPlainTextEdit(s.get("llm.instructions") or "")
-        self.instr_edit.setPlaceholderText("Свои правила обычными словами, например: «пиши «ё», числа — цифрами»")
+        self.instr_edit.setPlaceholderText("Свои правила обычными словами, например: «пиши «ё», без канцелярита»")
         self.instr_edit.setFixedHeight(80)
         self.instr_edit.textChanged.connect(lambda: s.set("llm.instructions", self.instr_edit.toPlainText()))
         holder = QWidget()
@@ -966,7 +1021,9 @@ class MainWindow(QMainWindow):
             self.llm_status.setText(f"Моделей в Ollama: {len(models)}" if models else "Ollama не отвечает")
 
     def _ai_toggled(self, on: bool) -> None:
-        if not on or self.app.corrector.provider() != "builtin":
+        if not on or self.app.router.cloud() is not None:
+            return      # с ключом DeepSeek ничего скачивать не нужно
+        if self.app.corrector.provider() != "builtin":
             return
         local = self.app.local_llm
         if local.ready or local.state in ("installing", "starting"):
@@ -974,21 +1031,91 @@ class MainWindow(QMainWindow):
         if not local.installed():
             from ..corrector import ollama_models, pick_qwen_small
             found = pick_qwen_small(ollama_models(self.settings.get("llm.ollama_url") or "http://127.0.0.1:11434"))
-            if found and QMessageBox.question(
-                    self, APP_NAME, f"У вас уже есть Ollama с моделью «{found}».\n\n"
-                    "Использовать её? Ничего скачивать не нужно.") == QMessageBox.Yes:
+            box = QMessageBox(self)
+            box.setWindowTitle(APP_NAME)
+            box.setText("Какой ИИ использовать?")
+            box.setInformativeText("DeepSeek — быстрее и качественнее, нужен ключ API и интернет.\n"
+                                   + (f"Ollama — у вас уже есть модель «{found}»." if found else
+                                      "Локальная Qwen3.5-0.8B — без интернета, скачается один раз (~0,5 ГБ)."))
+            ds = box.addButton("Вставить ключ DeepSeek", QMessageBox.AcceptRole)
+            loc = box.addButton(f"Ollama ({found})" if found else "Скачать локальную", QMessageBox.ActionRole)
+            box.addButton("Отмена", QMessageBox.RejectRole)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is ds:
+                self.focus_ai(key=True)
+                return
+            if clicked is not loc:
+                self.ai_switch.setChecked(False)
+                return
+            if found:
                 self.settings.set("llm.ollama_model", found)
                 self.settings.set("llm.provider", "ollama")
                 self.ollama_model.setCurrentText(found)
                 self._update_ai_rows()
                 return
-            answer = QMessageBox.question(
-                self, APP_NAME, "Скачать ИИ-модель Qwen3.5-0.8B (~0,9 ГБ) и движок llama.cpp (~0,5 ГБ)?\n\n"
-                "Это нужно один раз. Дальше всё работает без интернета.")
-            if answer != QMessageBox.Yes:
-                self.ai_switch.setChecked(False)
-                return
         self.app.install_llm()
+
+    def focus_ai(self, key: bool = True) -> None:
+        """Открыть раздел «ИИ-помощник» и поставить курсор в поле ключа DeepSeek."""
+        self.open_page("settings")
+        sec = getattr(self, "ai_section", None)
+        if sec is None:
+            return
+        sec.header.setChecked(True)
+        area = self.pages["settings"].area
+        QTimer.singleShot(60, lambda: area.ensureWidgetVisible(sec, 0, 40))
+        if key:
+            QTimer.singleShot(120, self.ds_key.setFocus)
+
+    def _deepseek_test(self) -> None:
+        key = self.ds_key.text().strip()
+        self.settings.set("llm.deepseek_key", key)
+        if not key:
+            self._on_ds_test("Вставьте ключ — его выдают на platform.deepseek.com → API keys.", False, None)
+            return
+        self.ds_status.setText("Проверяю DeepSeek…")
+        self.ds_status_row.show()
+        self.ds_status.setStyleSheet("")
+        settings, router = self.settings, self.app.router
+
+        def work():
+            import time as _t
+            models = None
+            try:
+                try:
+                    models = llm.list_deepseek_models(key, settings.get("llm.deepseek_url") or llm.DEEPSEEK_URL)
+                except llm.LLMError as exc:
+                    if getattr(exc, "fatal", False):
+                        raise
+                provider = router.cloud()
+                if provider is None:
+                    raise llm.LLMError("DeepSeek выключен переключателем выше")
+                t0 = _t.perf_counter()
+                answer = llm.request(provider, [{"role": "user", "content": "Ответь одним словом: готово"}],
+                                     max_tokens=10, timeout_s=15)
+                ms = (_t.perf_counter() - t0) * 1000
+                router.reset_cloud()
+                self.ds_result.emit(f"✓ DeepSeek работает: ответ за {ms:.0f} мс («{answer[:20]}»).", True, models)
+            except Exception as exc:  # noqa: BLE001
+                self.ds_result.emit(f"Не получилось: {llm.explain(exc)} ({str(exc)[:120]})", False, models)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_ds_test(self, text: str, ok: bool, models) -> None:
+        self.ds_status.setText(text)
+        self.ds_status_row.setVisible(bool(text))
+        self.ds_status.setStyleSheet(f"color: {self.colors['success' if ok else 'danger']};")
+        if models:
+            current = self.ds_model.currentText()
+            self.ds_model.blockSignals(True)
+            self.ds_model.clear()
+            self.ds_model.addItems([m for m in models if "reasoner" not in m] or models)
+            self.ds_model.setCurrentText(current if current in models else
+                                         next((m for m in llm.DEEPSEEK_MODELS if m in models), models[0]))
+            self.ds_model.blockSignals(False)
+            self.settings.set("llm.deepseek_model", self.ds_model.currentText())
+        self._show_ai_state(self.app.local_llm.state, self.app.local_llm.message, -1)
 
     def _ai_remove(self) -> None:
         if QMessageBox.question(self, APP_NAME, "Удалить ИИ-модель и движок с диска?") == QMessageBox.Yes:
@@ -1003,23 +1130,71 @@ class MainWindow(QMainWindow):
         provider = self.app.corrector.provider()
         builtin = provider == "builtin"
         enabled = self.settings.get("llm.correct", False) or self.settings.get("llm.enabled", False)
-        text = {"ready": f"✓ Готово · {message}", "error": message,
-                "stopped": "Модель скачана — включится вместе с переключателем.",
-                "absent": ""}.get(state, message)
-        if provider == "ollama":
-            text = f"✓ Ollama · {self.settings.get('llm.ollama_model')}" if enabled else ""
-            state = "ready"
-        elif provider == "openai":
-            text = "Используется ваш сервер (Дополнительно → ИИ-помощник)." if enabled else ""
-            state = "ready"
-        elif not enabled and state in ("stopped", "absent"):
-            text = ""
+        cloud = self.app.router.cloud()
+        if cloud is not None:
+            local = {"builtin": "Qwen3.5 (локально)", "ollama": f"Ollama · {self.settings.get('llm.ollama_model')}",
+                     "openai": "свой сервер"}.get(provider, provider)
+            text = f"✓ DeepSeek · {cloud.model}. Запасная: {local}." if enabled else ""
+            if self.app.router.last_cloud_error and enabled:
+                text = f"DeepSeek: {self.app.router.last_cloud_error}. Сейчас работает запасная: {local}."
+            if state == "installing" and progress >= 0:
+                text += f" {message}"
+            else:
+                state = "ready"
+        else:
+            text = {"ready": f"✓ Готово · {message}", "error": message,
+                    "stopped": "Модель скачана — включится вместе с переключателем.",
+                    "absent": "", "cloud": ""}.get(state, message)
+            if provider == "ollama":
+                text = f"✓ Ollama · {self.settings.get('llm.ollama_model')}" if enabled else ""
+                state = "ready"
+            elif provider == "openai":
+                text = "Используется ваш сервер (Дополнительно → ИИ-помощник)." if enabled else ""
+                state = "ready"
+            elif not enabled and state in ("stopped", "absent"):
+                text = ""
+            elif enabled and state == "absent":
+                text = "Вставьте ключ DeepSeek (Дополнительно → ИИ-помощник) или скачайте локальную модель."
         self.ai_status.setText(text)
         self.ai_status.setStyleSheet(f"color: {self.colors['danger']};" if state == "error" else "")
         self.ai_progress.setVisible(builtin and state == "installing" and progress >= 0)
         if progress >= 0:
             self.ai_progress.setValue(int(progress * 1000))
         self.ai_box.setVisible(bool(text) or self.ai_progress.isVisible())
+
+    # ------------------------------------------------------------- уведомления
+    def _render_notices(self) -> None:
+        if not hasattr(self, "notice_lay"):
+            return
+        while self.notice_lay.count():
+            item = self.notice_lay.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for key, (kind, text, action) in list(self.app.notices.items()):
+            card = QFrame()
+            card.setObjectName("BannerError" if kind == "error" else "Banner")
+            row = QHBoxLayout(card)
+            row.setContentsMargins(14, 10, 10, 10)
+            row.setSpacing(10)
+            label = QLabel(("⚠ " if kind in ("warn", "error") else "") + text)
+            label.setWordWrap(True)
+            label.setStyleSheet("background: transparent;")
+            row.addWidget(label, 1)
+            if action:
+                btn = QPushButton(action)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setObjectName("Primary")
+                btn.clicked.connect(lambda _=False, k=key: self.app.notice_action(k))
+                row.addWidget(btn, 0, Qt.AlignVCenter)
+            close = QPushButton("×")
+            close.setFixedSize(28, 28)
+            close.setStyleSheet("padding: 0; font-size: 16px;")
+            close.setCursor(Qt.PointingHandCursor)
+            close.setToolTip("Скрыть")
+            close.clicked.connect(lambda _=False, k=key: self.app.clear_notice(k))
+            row.addWidget(close, 0, Qt.AlignVCenter)
+            self.notice_lay.addWidget(card)
+        self.notice_holder.setVisible(bool(self.app.notices))
 
     def _clear_history(self) -> None:
         if QMessageBox.question(self, APP_NAME, "Удалить всю историю и записи голоса?") == QMessageBox.Yes:
@@ -1039,20 +1214,25 @@ class MainWindow(QMainWindow):
         current = self.settings.get("audio.input_device")
         self.mic_combo.blockSignals(True)
         self.mic_combo.clear()
-        for index, name in list_input_devices():
-            self.mic_combo.addItem("Как в системе" if index is None else name, None if index is None else name)
+        for value, label in list_input_devices():
+            self.mic_combo.addItem(label, value)
         found = self.mic_combo.findData(current)
         self.mic_combo.setCurrentIndex(found if found >= 0 else 0)
         self.mic_combo.blockSignals(False)
 
     def _llm_test(self) -> None:
         self.llm_status.setText("Проверяю…")
-        settings = self.settings
+        router = self.app.router
 
         def work():
+            local = router.local()
+            if local is None:
+                self.llm_result.emit("Запасная модель не запущена: включите ИИ или нажмите «Скачать / запустить».",
+                                     False)
+                return
             try:
-                answer = llm.chat(settings, "Ответь одним словом.", "Скажи «готово».",
-                                  base_url=self.app.corrector.endpoint(), provider=self.app.corrector.provider())
+                answer = llm.request(local, [{"role": "user", "content": "Скажи одно слово: готово"}],
+                                     max_tokens=16, timeout_s=20)
                 self.llm_result.emit(f"✓ Работает. Ответ: {answer[:40]}", True)
             except Exception as exc:  # noqa: BLE001
                 self.llm_result.emit(f"Не удалось подключиться: {exc}", False)
@@ -1091,10 +1271,12 @@ class MainWindow(QMainWindow):
         if state == "mic-error":
             QTimer.singleShot(8000, self.banner.hide)
         self.side_status.setText({"loading": "Готовлю распознавание…", "downloading": "Скачиваю модель…",
-                                  "error": "⚠ Ошибка распознавания"}.get(state, ""))
+                                  "error": "⚠ Ошибка распознавания",
+                                  "degraded": "⚠ Видеопамять занята"}.get(state, ""))
         color = {"ready": self.colors["success"], "error": self.colors["danger"]}.get(state, self.colors["warn"])
         label = {"ready": "Работает", "loading": "Загружается", "downloading": "Скачивается", "error": "Ошибка",
-                 "unloaded": "Выгружена (загрузится при диктовке)"}.get(state, state)
+                 "unloaded": "Выгружена (загрузится при диктовке)",
+                 "degraded": "Работает на процессоре — видеопамять занята"}.get(state, state)
         self.model_status.setText(f"<span style='color:{color}'>●</span>&nbsp; <b>{label}</b><br>"
                                   f"<span style='color:{self.colors['muted']}'>{message}</span>")
         self._update_model_path()

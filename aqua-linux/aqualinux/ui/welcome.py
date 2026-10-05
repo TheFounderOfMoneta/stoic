@@ -130,8 +130,8 @@ class Welcome(QFrame):
         self._title(lay, "Проверим микрофон", "Скажите что-нибудь вслух — полоска должна заполняться.")
         lay.addSpacing(8)
         self.mic_combo = QComboBox()
-        for index, name in list_input_devices():
-            self.mic_combo.addItem(name, None if index is None else name)
+        for value, label in list_input_devices():
+            self.mic_combo.addItem(label, value)
         found = self.mic_combo.findData(self.app.settings.get("audio.input_device"))
         self.mic_combo.setCurrentIndex(found if found >= 0 else 0)
         self.mic_combo.currentIndexChanged.connect(self._mic_changed)
@@ -169,8 +169,8 @@ class Welcome(QFrame):
         self._title(lay, "Ещё три приёма")
         combo = self._activate_combo()
         name = pretty_combo(combo)
-        lay.addWidget(_step_row(1, f"Нажмите {name} два раза быстро — можно говорить, не держа клавишу. "
-                                   f"Чтобы закончить, нажмите {name} ещё раз."))
+        lay.addWidget(_step_row(1, f"Коротко нажмите {name} (или щёлкните по капсуле) — можно долго говорить, "
+                                   f"не держа клавишу. Чтобы закончить, нажмите {name} ещё раз."))
         lay.addWidget(_step_row(2, "Передумали во время записи — нажмите Esc, ничего не вставится."))
         lay.addWidget(_step_row(3, f"Выделите текст и удерживайте {name} — скажите, что поменять: "
                                    "«сделай вежливее», «переведи на английский». Для этого нужен ИИ-помощник "

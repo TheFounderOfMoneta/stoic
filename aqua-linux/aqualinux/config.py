@@ -54,9 +54,9 @@ DEFAULTS: dict = {
         "hands_free": [],                          # отдельное сочетание «без рук» (необязательно)
         "paste_last": [["ctrl", "super", "v"]],    # вставить последнюю диктовку (как Cmd+Ctrl+V)
         "cancel": [["escape"]],                    # отмена во время записи
-        "double_tap_hands_free": True,             # двойное нажатие клавиши = «без рук»
+        "double_tap_hands_free": True,             # короткое нажатие (или двойное) = длинная запись «без рук»
         "tap_threshold_ms": 280,                   # короче — нажатие, длиннее — удержание
-        "double_tap_window_ms": 380,
+        "double_tap_window_ms": 380,               # второе нажатие в этом окне не останавливает запись
         "neutralize_modifier": True,               # чтобы одиночный Alt не открывал меню в Firefox
         "enabled": True,
     },
@@ -71,6 +71,7 @@ DEFAULTS: dict = {
         "max_minutes": 20,
         "save_audio": True,            # аудио в истории (как в Aqua — 3 дня)
         "keep_audio_days": 3,
+        "warn_clipping": True,         # предупреждать, если микрофон перегружен
     },
     # --- Распознавание ----------------------------------------------------
     "asr": {
@@ -100,6 +101,8 @@ DEFAULTS: dict = {
         "fuzzy_dictionary": True,
         "fuzzy_threshold": 0.84,
         "casual_messaging": False,     # строчные и без точки в мессенджерах
+        "numbers": True,               # «номер один» → «№ 1», «двадцать пять» → «25»
+        "number_style": "sign",        # sign («№ 5») | word («номер 5»)
     },
     # --- Плавающая панель («облачко») -------------------------------------
     "bubble": {
@@ -115,7 +118,13 @@ DEFAULTS: dict = {
     },
     # --- ИИ: улучшение текста и Edit Mode ----------------------------------
     "llm": {
-        "provider": "builtin",         # builtin (Qwen3.5-0.8B через llama.cpp) | ollama | openai
+        # Основной ИИ — DeepSeek API (если вставлен ключ), локальная модель — запасная.
+        "cloud": True,                 # использовать DeepSeek, когда есть ключ
+        "deepseek_key": "",
+        "deepseek_model": "deepseek-flash",
+        "deepseek_url": "https://api.deepseek.com",
+        "cloud_timeout_ms": 4000,      # DeepSeek не ответил за это время — запасная модель/исходный текст
+        "provider": "builtin",         # запасная/локальная: builtin (Qwen3.5-0.8B, llama.cpp) | ollama | openai
         "correct": False,              # улучшать распознанный текст
         "correct_timeout_ms": 2500,    # не успела — вставляем исходный текст
         "correct_min_words": 4,        # короткие фразы не трогаем

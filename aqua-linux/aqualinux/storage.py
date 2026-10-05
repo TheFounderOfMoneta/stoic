@@ -188,14 +188,78 @@ class JsonStore:
         os.replace(tmp, self.path)
 
 
-DEFAULT_DICTIONARY = {
-    "terms": [
-        {"term": "GigaAM", "sounds_like": ["гигаам", "гига ам", "гига эй эм"], "fuzzy": False},
-        {"term": "Ubuntu", "sounds_like": ["убунту", "убунта"], "fuzzy": True},
-        {"term": "GitHub", "sounds_like": ["гитхаб", "гит хаб"], "fuzzy": True},
-        {"term": "Python", "sounds_like": [], "fuzzy": True},
-    ],
-}
+DICTIONARY_VERSION = 2
+
+
+def _t(term: str, *sounds: str, fuzzy: bool = False) -> dict:
+    return {"term": term, "sounds_like": list(sounds), "fuzzy": fuzzy}
+
+
+# Как GigaAM обычно слышит английские термины в русской речи. Слова, которые часто бывают
+# обычными русскими («куда», «кодекс», «питон»), сюда не входят — их можно добавить вручную.
+DEFAULT_TERMS = [
+    _t("GigaAM", "гигаам", "гига ам", "гига эй эм"),
+    _t("Ubuntu", "убунту", "убунта", fuzzy=True),
+    _t("GitHub", "гитхаб", "гит хаб", "гитхабе", fuzzy=True),
+    _t("GitLab", "гитлаб", "гит лаб"),
+    _t("Git", "гит"),
+    _t("Python", "пайтон", "пайтоне", fuzzy=True),
+    _t("Qwen", "квен", "квэн", "квин", "кьювен", "КВН"),
+    _t("ChatGPT", "чат гпт", "чатгпт", "чат джипити", "чат джи пи ти", "чат GPT"),
+    _t("GPT", "гпт", "джипити", "джи пи ти"),
+    _t("OpenAI", "опен эй ай", "опенэйай", "оупен эй ай", "опен ай"),
+    _t("Claude Code", "клод код", "клауд код"),
+    _t("Claude", "клод", "клауд"),
+    _t("Anthropic", "антропик", "антропика"),
+    _t("DeepSeek", "дипсик", "дип сик", "дипсика"),
+    _t("Gemini", "джемини", "гемини"),
+    _t("Ollama", "оллама", "олама", "олламе", "олламу"),
+    _t("llama.cpp", "лама цпп", "лама си пи пи", "ллама цпп"),
+    _t("Hugging Face", "хаггинг фейс", "хагинг фейс", "хаггинг фейс"),
+    _t("Linux", "линукс", "линуксе", "линуксом"),
+    _t("Windows", "виндоус", "виндовс", "виндоуз"),
+    _t("macOS", "мак ос", "макос", "мак оус"),
+    _t("Docker", "докер", "докере", "докером"),
+    _t("Kubernetes", "кубернетис", "кубернетес", fuzzy=True),
+    _t("JavaScript", "джаваскрипт", "джава скрипт", fuzzy=True),
+    _t("TypeScript", "тайпскрипт", "тайп скрипт", fuzzy=True),
+    _t("NVIDIA", "нвидиа", "нвидия", "энвидиа", "энвидия"),
+    _t("PyTorch", "пайторч", "пай торч", fuzzy=True),
+    _t("VS Code", "вс код", "ви эс код", "вскод", "вэ эс код"),
+    _t("API", "апи", "эй пи ай"),
+    _t("JSON", "джейсон", "джисон"),
+    _t("Wi-Fi", "вайфай", "вай фай"),
+    _t("USB", "юэсби", "ю эс би"),
+    _t("Aqua Voice", "аква войс", "аква воис"),
+]
+DEFAULT_DICTIONARY = {"version": DICTIONARY_VERSION, "terms": DEFAULT_TERMS}
+
+
+def migrate_dictionary(store: "JsonStore") -> bool:
+    """Добавить в словарь пользователя новые встроенные слова (один раз на версию).
+    Слова, которые человек удалил раньше, после этого не возвращаются."""
+    data = store.data
+    if int(data.get("version", 1) or 1) >= DICTIONARY_VERSION:
+        return False
+    terms = data.setdefault("terms", [])
+    known = {(t.get("term") or "").strip().lower() for t in terms}
+    for entry in DEFAULT_TERMS:
+        if entry["term"].lower() not in known:
+            terms.append(json.loads(json.dumps(entry)))
+        else:
+            # У старых встроенных слов дополняем варианты произношения.
+            for t in terms:
+                if (t.get("term") or "").strip().lower() == entry["term"].lower():
+                    have = {s.lower() for s in t.get("sounds_like", [])}
+                    t.setdefault("sounds_like", []).extend(s for s in entry["sounds_like"] if s.lower() not in have)
+    data["version"] = DICTIONARY_VERSION
+    try:
+        store.save()
+    except OSError:
+        pass
+    return True
+
+
 DEFAULT_REPLACEMENTS = {
     "replacements": [
         {"from": "мой email", "to": "name@example.com", "preserve_case": True, "strip_punct": True},

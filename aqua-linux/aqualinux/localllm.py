@@ -67,8 +67,7 @@ def _open(url: str, headers: Optional[dict] = None, timeout: float = 30):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
-def download(url: str, dest: Path, progress: Optional[Callable[[int, int], None]] = None) -> Path:
-    """Скачивание с докачкой (.part + Range)."""
+def _download_once(url: str, dest: Path, progress: Optional[Callable[[int, int], None]]) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     done = part.stat().st_size if part.exists() else 0
@@ -94,9 +93,37 @@ def download(url: str, dest: Path, progress: Optional[Callable[[int, int], None]
                 if progress:
                     progress(done, total)
     if total and done < total:
-        raise InstallError(f"Загрузка оборвалась: {dest.name}")
+        raise InstallError(f"Загрузка оборвалась: {dest.name} ({done} из {total} байт)")
     os.replace(part, dest)
     return dest
+
+
+def download(url: str, dest: Path, progress: Optional[Callable[[int, int], None]] = None,
+             attempts: int = 6, on_retry: Optional[Callable[[int, str], None]] = None) -> Path:
+    """Скачивание с докачкой (.part + Range) и автоматическими повторами при обрыве.
+
+    После обрыва продолжаем с того же места: 1, 2, 4, 8, 16 с паузы между попытками.
+    Ошибки 404/403 не повторяем — файла просто нет.
+    """
+    delay = 1.0
+    for attempt in range(1, attempts + 1):
+        try:
+            return _download_once(url, dest, progress)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403, 404, 410) or attempt == attempts:
+                raise
+            reason = f"HTTP {exc.code}"
+        except (InstallError, OSError, TimeoutError) as exc:
+            if attempt == attempts:
+                raise InstallError(f"Не удалось скачать {dest.name} за {attempts} попыток: {exc}") from exc
+            reason = str(exc) or exc.__class__.__name__
+        log.warning("Загрузка %s прервалась (%s) — повтор %d/%d через %.0f с",
+                    dest.name, reason, attempt + 1, attempts, delay)
+        if on_retry:
+            on_retry(attempt + 1, reason)
+        time.sleep(delay)
+        delay = min(delay * 2, 16.0)
+    raise InstallError(f"Не удалось скачать {dest.name}")
 
 
 def extract(archive: Path, target: Path) -> None:
@@ -166,20 +193,33 @@ def find_local_gguf(quant: str = "Q4_K_M") -> Optional[Path]:
 
 
 def model_file(repo_override: str = "", quant: str = "Q4_K_M") -> tuple[str, str]:
-    """(имя файла, url) GGUF-весов Qwen3.5-0.8B: перебираем репозитории и кванты."""
+    """(имя файла, url) GGUF-весов Qwen3.5-0.8B.
+
+    Сначала ищем нужный квант (Q4_K_M, ~0,5 ГБ) во ВСЕХ репозиториях и только потом
+    переходим к более тяжёлым — иначе первый репозиторий без Q4 отдал бы Q8 (~0,8 ГБ).
+    """
     repos = [repo_override] if repo_override else list(MODEL_REPOS)
     quants = [quant] + [q for q in QUANTS if q != quant]
     errors = []
+    listing: dict[str, list[str]] = {}
     for repo in repos:
-        try:
-            with _open(f"{HF}/api/models/{repo}", timeout=20) as resp:
-                files = [s["rfilename"] for s in json.loads(resp.read().decode()).get("siblings", [])]
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{repo}: {exc}")
-            continue
-        ggufs = [f for f in files if f.lower().endswith(".gguf") and "mmproj" not in f.lower()]
-        for q in quants:
-            match = next((f for f in ggufs if re.search(rf"[-_.]{re.escape(q)}\.gguf$", f, re.IGNORECASE)), None)
+        for attempt in range(3):
+            try:
+                with _open(f"{HF}/api/models/{repo}", timeout=20) as resp:
+                    files = [s["rfilename"] for s in json.loads(resp.read().decode()).get("siblings", [])]
+                listing[repo] = [f for f in files if f.lower().endswith(".gguf") and "mmproj" not in f.lower()]
+                break
+            except urllib.error.HTTPError as exc:
+                errors.append(f"{repo}: HTTP {exc.code}")
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 2:
+                    errors.append(f"{repo}: {exc}")
+                time.sleep(1 + attempt)
+    for q in quants:
+        for repo in repos:
+            match = next((f for f in listing.get(repo, [])
+                          if re.search(rf"[-_.]{re.escape(q)}\.gguf$", f, re.IGNORECASE)), None)
             if match:
                 return Path(match).name, f"{HF}/{repo}/resolve/main/{match}"
     raise InstallError("Не нашёл GGUF-файл Qwen3.5-0.8B на Hugging Face. " + "; ".join(errors))
@@ -613,6 +653,36 @@ def ollama_setup(settings: Settings, name: str = "qwen3.5:0.8b-local") -> int:
     return 0
 
 
+def deepseek_setup(settings: Settings, key: Optional[str] = None) -> int:
+    """Сохранить ключ DeepSeek, включить улучшение текста и проверить ключ. 0 — работает."""
+    from . import llm as cloud
+    if key is None:
+        import getpass
+        try:
+            key = getpass.getpass("Ключ DeepSeek API (ввод не виден, Enter — пропустить): ")
+        except (EOFError, KeyboardInterrupt):
+            key = ""
+    key = (key or "").strip()
+    if not key:
+        print("Ключ не указан — его можно вставить позже: Настройки → Дополнительно → ИИ-помощник.")
+        return 6
+    settings.set("llm.deepseek_key", key)
+    settings.set("llm.cloud", True)
+    settings.set("llm.correct", True)
+    settings.set("llm.enabled", True)
+    router = cloud.Router(settings)
+    provider = router.cloud()
+    try:
+        t0 = time.perf_counter()
+        answer = cloud.request(provider, [{"role": "user", "content": "Ответь одним словом: готово"}],
+                               max_tokens=10, timeout_s=20)
+        print(f"Готово: DeepSeek ответил за {(time.perf_counter() - t0) * 1000:.0f} мс («{answer[:20]}»).")
+        return 0
+    except cloud.LLMError as exc:
+        print(f"Ключ сохранён, но проверка не прошла: {cloud.explain(exc)} ({str(exc)[:120]})")
+        return 5
+
+
 # ---------------------------------------------------------------- CLI
 def main(argv=None) -> int:
     import argparse
@@ -622,7 +692,10 @@ def main(argv=None) -> int:
     inst.add_argument("--enable", action="store_true", help="сразу включить улучшение текста")
     inst.add_argument("--backend", choices=["auto", "cuda", "vulkan", "cpu"], default=None)
     sub.add_parser("status")
+    sub.add_parser("configured", help="код 0 — запасная локальная модель уже готова")
     sub.add_parser("ollama-setup", help="использовать Ollama (создать qwen3.5:0.8b-local из найденного GGUF)")
+    ds = sub.add_parser("deepseek", help="вставить ключ DeepSeek API и проверить его")
+    ds.add_argument("--key", default=None, help="ключ (если не указан — спросить, ввод не виден)")
     test = sub.add_parser("test", help="запустить сервер и исправить пример")
     test.add_argument("text", nargs="?", default="скинь мне пожалуйста ссылку на гит хаб репозиторий "
                                                  "я хотел спросить на счёт встречи в пятницу")
@@ -649,6 +722,17 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "ollama-setup":
         return ollama_setup(settings)
+    if args.cmd == "configured":
+        has_key = bool((settings.get("llm.deepseek_key") or "").strip())
+        provider = settings.get("llm.provider") or "builtin"
+        local_ok = (provider == "builtin" and llm.installed()) or provider == "ollama" or \
+            (provider == "openai" and bool(settings.get("llm.base_url")))
+        print("DeepSeek:", "ключ есть" if has_key else "нет ключа",
+              "| запасная:", {"builtin": "Qwen3.5 (llama.cpp)", "ollama": "Ollama", "openai": "свой сервер"}
+              .get(provider, provider) + (" готова" if local_ok else " не установлена"))
+        return 0 if local_ok else 1
+    if args.cmd == "deepseek":
+        return deepseek_setup(settings, args.key)
     if args.cmd == "status":
         print("Сборка:", llm.wanted_backend(), "установлена" if llm.installed() else "не установлена")
         print("Модель:", llm.model_path() or "нет")

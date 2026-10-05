@@ -68,7 +68,7 @@ def rgba(hex_color: str, alpha: float) -> QColor:
 
 
 class Bubble(QWidget):
-    clicked = Signal()              # щелчок по капсуле в покое → диктовка без рук
+    clicked = Signal()              # щелчок по капсуле → длинная запись без удержания
     stop_clicked = Signal()         # красная кнопка
     cancel_clicked = Signal()
     menu_requested = Signal(QPoint)
@@ -125,6 +125,7 @@ class Bubble(QWidget):
         self._drag_origin = None
         self._last = time.monotonic()
         self._msg_until = 0.0
+        self.base_state = "idle"     # куда вернуться после сообщения (запись/обработка/покой)
         self._input_rect = None
         self._xshape = None
 
@@ -270,7 +271,7 @@ class Bubble(QWidget):
         st = self.state
 
         if st == "message" and now >= self._msg_until:
-            self.state = "idle"
+            self.state = self.base_state if self.base_state in ("idle", "processing") else "idle"
             self.message = ""
             self.apply_targets()
 
@@ -329,7 +330,12 @@ class Bubble(QWidget):
         return rect.adjusted(-3, -3, 3, 3)
 
     def _update_input_region(self) -> None:
-        rect = self._interactive_rect().toAlignedRect()
+        # XShape работает в физических пикселях, а Qt рисует в логических: при масштабе
+        # GNOME 125 % (Xft.dpi 120) без пересчёта зона кликов уезжала мимо капсулы.
+        dpr = self.devicePixelRatioF() or 1.0
+        logical = self._interactive_rect()
+        rect = QRectF(logical.x() * dpr, logical.y() * dpr, logical.width() * dpr,
+                      logical.height() * dpr).toAlignedRect()
         if rect == self._input_rect or not self.isVisible():
             return
         self._input_rect = rect
@@ -757,8 +763,8 @@ class Bubble(QWidget):
         pos = event.position()
         if self.state == "hands_free" and self.stop_button_rect().adjusted(-4, -4, 4, 4).contains(pos):
             self.stop_clicked.emit()
-        elif self.state == "idle":
-            self.clicked.emit()
+        elif self.state in ("idle", "processing"):
+            self.clicked.emit()     # новая длинная запись (можно, пока предыдущая ещё обрабатывается)
         elif self.state in ("listening", "hands_free"):
             self.stop_clicked.emit()
         elif self.state == "message":

@@ -42,6 +42,37 @@ ask()  { (( ASSUME_YES )) && return 0; read -r -p "$1 [Д/н] " a; [[ -z "$a" ||
 command -v python3.12 >/dev/null || die "Нужен Python 3.12 (python3.12)"
 [[ $EUID -ne 0 ]] || die "Запускайте без sudo — установка идёт в домашний каталог"
 
+# ---------------------------------------------------------------- уже установлено?
+LAUNCHER="$BIN_DIR/$APP"
+PREV_ROOT=""
+WAS_RUNNING=0
+if [[ -f "$LAUNCHER" ]]; then
+    PREV_ROOT="$(sed -n 's/^export PYTHONPATH="\([^$"]*\).*/\1/p' "$LAUNCHER" | head -n1)"
+fi
+if [[ -n "$PREV_ROOT" ]]; then
+    say "Aqua Linux уже установлена: $PREV_ROOT"
+    if [[ "$PREV_ROOT" == "$ROOT" ]]; then
+        echo "    Обновляю на месте — готовые шаги пропускаются, ничего лишнего не скачивается."
+    else
+        echo "    Ставлю новую версию из $ROOT. Настройки, история, словарь и модели сохранятся."
+    fi
+elif [[ -x "$VENV/bin/python" ]]; then
+    say "Нашёл незавершённую установку в $ROOT — продолжаю с того же места"
+fi
+if pgrep -u "$(id -u)" -f -- "-m aqualinux( |$)" >/dev/null 2>&1; then
+    WAS_RUNNING=1
+    say "Aqua Linux сейчас запущена — закрываю её на время обновления"
+    "$LAUNCHER" quit >/dev/null 2>&1 || true
+    for _ in $(seq 1 50); do
+        pgrep -u "$(id -u)" -f -- "-m aqualinux( |$)" >/dev/null 2>&1 || break
+        sleep 0.1
+    done
+    if pgrep -u "$(id -u)" -f -- "-m aqualinux( |$)" >/dev/null 2>&1; then
+        pkill -u "$(id -u)" -f -- "-m aqualinux( |$)" || true
+        sleep 0.5
+    fi
+fi
+
 # ---------------------------------------------------------------- системные пакеты
 say "Проверяю системные пакеты"
 need=()
@@ -64,16 +95,31 @@ fi
 ok "Системные пакеты на месте"
 
 # ---------------------------------------------------------------- окружение Python
+if [[ ! -x "$VENV/bin/python" && -n "$PREV_ROOT" && "$PREV_ROOT" != "$ROOT" && -x "$PREV_ROOT/.venv/bin/python" ]]; then
+    if ask "Перенести готовое окружение (PyTorch, PySide6) из $PREV_ROOT, чтобы не скачивать заново?"; then
+        mv "$PREV_ROOT/.venv" "$VENV"
+        ok "Окружение перенесено"
+    fi
+fi
+FRESH_VENV=0
 if [[ ! -x "$VENV/bin/python" ]]; then
     say "Создаю окружение $VENV"
     python3.12 -m venv "$VENV"
+    FRESH_VENV=1
 fi
 PY="$VENV/bin/python"
-"$PY" -m pip install -q --upgrade pip wheel
+if (( FRESH_VENV )); then
+    "$PY" -m pip install -q --upgrade pip wheel
+fi
 
 # ---------------------------------------------------------------- PyTorch
 site_of() { "$1/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])'; }
-if [[ -z "$TORCH_FROM" && $CPU_ONLY -eq 0 && -x "$KNOWN_GIGAAM/.venv/bin/python" ]]; then
+TORCH_READY=0
+if [[ -z "$TORCH_FROM" && $CPU_ONLY -eq 0 ]] && "$PY" -c "import torch, torchaudio" 2>/dev/null; then
+    TORCH_READY=1
+    ok "PyTorch уже есть ($("$PY" -c 'import torch; print(torch.__version__)' 2>/dev/null)) — пропускаю"
+fi
+if (( ! TORCH_READY )) && [[ -z "$TORCH_FROM" && $CPU_ONLY -eq 0 && -x "$KNOWN_GIGAAM/.venv/bin/python" ]]; then
     if "$KNOWN_GIGAAM/.venv/bin/python" -c "import torch, torchaudio" 2>/dev/null; then
         say "Найдено готовое окружение GigaAM: $KNOWN_GIGAAM/.venv"
         if ask "Взять PyTorch оттуда (экономит ~2,5 ГБ загрузки)?"; then
@@ -82,7 +128,9 @@ if [[ -z "$TORCH_FROM" && $CPU_ONLY -eq 0 && -x "$KNOWN_GIGAAM/.venv/bin/python"
     fi
 fi
 PTH="$(site_of "$VENV")/zz_external_torch.pth"
-if [[ -n "$TORCH_FROM" ]]; then
+if (( TORCH_READY )); then
+    :
+elif [[ -n "$TORCH_FROM" ]]; then
     [[ -x "$TORCH_FROM/bin/python" ]] || die "Нет $TORCH_FROM/bin/python"
     "$TORCH_FROM/bin/python" -c "import sys; assert sys.version_info[:2] == (3, 12)" \
         || die "Окружение $TORCH_FROM должно быть на Python 3.12"
@@ -103,10 +151,33 @@ else
     fi
 fi
 
-say "Ставлю зависимости приложения (PySide6 ~100 МБ, пара минут)"
-"$PY" -m pip install --progress-bar on -r "$ROOT/requirements.txt"
-"$PY" -m pip install -q --no-deps "silero-vad==6.2.3"
-ok "Зависимости установлены"
+reqs_ok() {
+    "$PY" - "$ROOT/requirements.txt" <<'PYEOF' 2>/dev/null
+import sys
+from importlib.metadata import PackageNotFoundError, version
+from packaging.requirements import Requirement
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.split("#", 1)[0].strip()
+    if not line:
+        continue
+    req = Requirement(line)
+    try:
+        have = version(req.name)
+    except PackageNotFoundError:
+        sys.exit(1)
+    if req.specifier and not req.specifier.contains(have, prereleases=True):
+        sys.exit(1)
+version("silero-vad")
+PYEOF
+}
+if reqs_ok; then
+    ok "Зависимости приложения уже установлены — пропускаю"
+else
+    say "Ставлю зависимости приложения (PySide6 ~100 МБ, пара минут)"
+    "$PY" -m pip install --progress-bar on -r "$ROOT/requirements.txt"
+    "$PY" -m pip install -q --no-deps "silero-vad==6.2.3"
+    ok "Зависимости установлены"
+fi
 
 # ---------------------------------------------------------------- веса модели
 say "Ищу веса GigaAM v3 E2E RNNT"
@@ -133,15 +204,29 @@ else
     warn "Веса не найдены — приложение скачает их при первом запуске (~0,9 ГБ) с CDN SberDevices"
 fi
 
-# ---------------------------------------------------------------- ИИ (Qwen3.5-0.8B)
-say "ИИ для улучшения текста (Qwen3.5-0.8B, локально)"
-AI_DONE=0
-if command -v ollama >/dev/null || curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-    ok "Найдена Ollama — сначала пробую её (ничего не скачивается)"
-    if PYTHONPATH="$ROOT" "$PY" -m aqualinux.localllm ollama-setup; then AI_DONE=1; fi
+# ---------------------------------------------------------------- ИИ
+say "ИИ для улучшения текста"
+LLM() { PYTHONPATH="$ROOT" "$PY" -m aqualinux.localllm "$@"; }
+HAS_KEY="$(PYTHONPATH="$ROOT" "$PY" -c 'from aqualinux.config import Settings; print(1 if (Settings().get("llm.deepseek_key") or "").strip() else 0)' 2>/dev/null || echo 0)"
+if [[ "$HAS_KEY" == "1" ]]; then
+    ok "Ключ DeepSeek уже вставлен — основной ИИ готов"
+elif (( ! ASSUME_YES )); then
+    echo "    Основной ИИ — DeepSeek API: быстро, качественно, копейки за запрос, видеокарта не нужна."
+    echo "    Ключ: platform.deepseek.com → API keys. Можно пропустить и вставить позже в Настройках."
+    LLM deepseek || true
 fi
-if (( ! AI_DONE )) && ask "Подключить встроенный ИИ (llama.cpp + Qwen3.5-0.8B)? Уже установленные CUDA, llama-server и GGUF будут использованы без загрузки"; then
-    PYTHONPATH="$ROOT" "$PY" -m aqualinux.localllm install --enable || warn "ИИ не подключился — включите позже в Настройках"
+# Запасная модель — на случай, если нет интернета (уже установленное используется без загрузки).
+if LLM configured >/dev/null 2>&1; then
+    ok "Запасная локальная модель уже готова — пропускаю"
+else
+    AI_DONE=0
+    if command -v ollama >/dev/null || curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+        ok "Найдена Ollama — запасной будет она (ничего не скачивается)"
+        if LLM ollama-setup; then AI_DONE=1; fi
+    fi
+    if (( ! AI_DONE )) && ask "Поставить запасную локальную модель Qwen3.5-0.8B (~0,5 ГБ, работает без интернета)? Уже установленные CUDA, llama-server и GGUF используются без загрузки"; then
+        LLM install --enable || warn "Запасная модель не установилась — можно позже в Настройках"
+    fi
 fi
 
 # ---------------------------------------------------------------- ярлыки
@@ -199,3 +284,10 @@ case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR не в PATH — запу
 echo
 ok "Готово! Запуск: $APP   (или «Aqua Linux» в меню приложений)"
 echo "   Удерживайте Правый Alt и говорите. Отпустите — текст вставится."
+echo "   Коротко нажмите Правый Alt (или щёлкните по капсуле) — длинная запись без удержания."
+if (( WAS_RUNNING )); then
+    say "Запускаю обновлённую версию"
+    nohup "$LAUNCHER" --background >/dev/null 2>&1 &
+elif [[ -n "${DISPLAY:-}" ]] && ask "Запустить Aqua Linux сейчас?"; then
+    nohup "$LAUNCHER" >/dev/null 2>&1 &
+fi

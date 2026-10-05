@@ -71,7 +71,26 @@ def main() -> int:
         problems += 1
     else:
         mics = list_input_devices()
-        print(f"{OK} Микрофоны: {len(mics) - 1} устройств(а)")
+        names = ", ".join(label for value, label in mics[1:4])
+        print(f"{OK} Микрофоны: {len(mics) - 1}" + (f" ({names})" if names else ""))
+        try:
+            from .pwaudio import list_sources
+            src = next((x for x in list_sources() if x.default), None)
+            if src is not None and src.gain_db is not None and src.gain_db > 36:
+                print(f"{WARN} Усиление микрофона «{src.description}» +{src.gain_db:.0f} дБ — речь может "
+                      f"перегружаться. Aqua предложит снизить его после первой диктовки.")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .gpu import memory, users, gb
+            mem = memory()
+            if mem is not None:
+                total, used, free = mem
+                busy = ", ".join(f"{u.name} {gb(u.used_mb)}" for u in users() if u.used_mb >= 64)
+                line = f"Видеопамять: свободно {gb(free)} из {gb(total)}" + (f" (заняли: {busy})" if busy else "")
+                print(f"{WARN if free < 900 else OK} {line}")
+        except Exception:  # noqa: BLE001
+            pass
     if os.environ.get("DISPLAY"):
         try:
             from Xlib import display

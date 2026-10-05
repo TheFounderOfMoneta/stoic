@@ -5,6 +5,8 @@ import difflib
 import re
 from dataclasses import dataclass
 
+from .numbers import normalize as normalize_numbers
+
 # Звуки-заминки, которые никогда не бывают смысловыми словами.
 FILLERS_RU = r"э+|э-э+|эм+|эээм|м+|мм+|хм+|а-а+|ммм|угу-угу"
 FILLERS_EN = r"um+|uh+|erm+|hmm+|uhm+"
@@ -18,6 +20,14 @@ VOICE_COMMANDS = [
     (re.compile(r",?\s*\bnew paragraph\b[,.]?\s*", re.IGNORECASE), "\n\n"),
     (re.compile(r",?\s*\bnew line\b[,.]?\s*", re.IGNORECASE), "\n"),
 ]
+
+_SENTENCE_END = re.compile(r"([.!?])(\s+)([a-zа-яё])")
+ABBREVIATIONS = {
+    "т", "т.е", "т.к", "т.д", "т.п", "т.н", "е", "к", "д", "п", "н", "см", "г", "гг", "ул", "пр", "просп",
+    "пл", "пер", "кв", "стр", "рис", "табл", "руб", "коп", "тыс", "млн", "млрд", "др", "им", "акад",
+    "проф", "доц", "гл", "ст", "ср", "напр", "мин", "сек", "ч", "кг", "км", "см", "мм", "л", "шт", "с",
+    "вкл", "искл", "англ", "рус", "лат", "etc", "e.g", "i.e", "vs", "mr", "mrs", "dr", "no",
+}
 
 _LAT2CYR = [
     ("sch", "щ"), ("sh", "ш"), ("ch", "ч"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"), ("ya", "я"),
@@ -164,6 +174,17 @@ class TextProcessor:
                 replaced.update(range(first, last + 1))
         return "".join(tokens)
 
+    def capitalize_sentences(self, text: str) -> str:
+        """Заглавная буква после точки, «!» и «?» («Всем привет. я хочу» → «…Я хочу»),
+        кроме сокращений («т. е.», «см.», «ул.», «руб.»…)."""
+        def repl(m: re.Match) -> str:
+            before = text[:m.start() + 1]
+            word = re.search(r"([\w.]+)\.$", before)
+            if m.group(1) == "." and word and word.group(1).lower().replace("ё", "е") in ABBREVIATIONS:
+                return m.group(0)
+            return m.group(1) + m.group(2) + m.group(3).upper()
+        return _SENTENCE_END.sub(repl, text)
+
     def finalize(self, text: str) -> str:
         text = re.sub(r"[ \t]{2,}", " ", text)
         text = re.sub(r" +([,.!?…:;])", r"\1", text)
@@ -179,6 +200,9 @@ class TextProcessor:
             text = self.voice_commands(text)
         text = self.apply_dictionary(text, settings.get("text.fuzzy_dictionary", True),
                                      float(settings.get("text.fuzzy_threshold", 0.84)))
+        if settings.get("text.numbers", True):
+            text = normalize_numbers(text, settings.get("text.number_style", "sign") or "sign")
+        text = self.capitalize_sentences(text)
         return self.finalize(text)
 
 

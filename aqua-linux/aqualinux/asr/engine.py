@@ -94,6 +94,7 @@ class ASREngine:
         self.state = "unloaded"
         self.last_used = time.monotonic()
         self.device_label = ""
+        self.force_cpu_reason = ""     # почему распознавание ушло на процессор (видеопамять занята)
 
     # ------------------------------------------------------------------ API
     def start(self) -> None:
@@ -103,6 +104,10 @@ class ASREngine:
     def reload(self) -> None:
         self._q.put(("unload",))
         self._q.put(("load",))
+
+    def retry_gpu(self) -> None:
+        """Ещё раз попробовать видеокарту (например, после выгрузки моделей Ollama)."""
+        self._q.put(("retry_gpu",))
 
     def begin(self, sid: int, preview: bool = False) -> None:
         self._q.put(("begin", sid, preview))
@@ -155,6 +160,10 @@ class ASREngine:
             self._load()
         elif kind == "unload":
             self._unload()
+        elif kind == "retry_gpu":
+            self.force_cpu_reason = ""
+            self._unload()
+            self._load()
         elif kind == "begin":
             self._session = Session(cmd[1], preview=cmd[2])
             if self.vad is not None:
@@ -209,6 +218,20 @@ class ASREngine:
         if want == "cuda" and not cuda_ok:
             log.warning("CUDA недоступна, переключаюсь на CPU")
         device = "cuda" if (want in ("auto", "cuda") and cuda_ok) else "cpu"
+        if device == "cuda" and self.force_cpu_reason:
+            device = "cpu"
+        elif device == "cuda":
+            try:
+                free, _total = torch.cuda.mem_get_info()
+                free_mb = int(free / 2 ** 20)
+            except Exception:  # noqa: BLE001
+                free_mb = None
+            from ..gpu import ASR_NEED_MB, describe
+            if free_mb is not None and free_mb < ASR_NEED_MB:
+                # Видеопамять заняли (Ollama, игра…): работаем на процессоре и честно говорим почему.
+                self.force_cpu_reason = describe(free_mb)
+                log.warning("%s — распознавание на CPU", self.force_cpu_reason)
+                device = "cpu"
         if precision == "auto":
             precision = "int8" if device == "cuda" else "fp32"
         if device == "cpu" and precision == "fp16":
@@ -282,21 +305,33 @@ class ASREngine:
             model = model.eval()
             if precision == "fp16":
                 model.encoder = model.encoder.half()
-            model = model.to(device)
-            if precision == "int8":
+            if precision == "int8" and device == "cuda":
+                # Квантуем ещё на CPU: на видеокарту уходят уже INT8-веса (пик памяти втрое ниже).
+                from .int8_encoder import quantize_encoder
+                model.encoder.float()
+                quantize_encoder(model.encoder)
+            try:
+                model = model.to(device)
                 if device == "cuda":
-                    from .int8_encoder import quantize_encoder
-                    model.encoder.float()
-                    quantize_encoder(model.encoder)
-                else:
-                    model.encoder = torch.ao.quantization.quantize_dynamic(
-                        model.encoder, {torch.nn.Linear}, dtype=torch.qint8)
-            if device == "cuda":
-                torch.cuda.empty_cache()
-                from .fast_decoder import GraphRNNT
-                self.graph = GraphRNNT(model.head, model.decoding, 1, steps=8)
-                self.device_label = torch.cuda.get_device_name(0)
-            else:
+                    torch.cuda.empty_cache()
+                    from .fast_decoder import GraphRNNT
+                    self.graph = GraphRNNT(model.head, model.decoding, 1, steps=8)
+                    self.device_label = torch.cuda.get_device_name(0)
+            except Exception as exc:  # noqa: BLE001
+                if device != "cuda" or not _is_oom(exc):
+                    raise
+                from ..gpu import describe
+                self.force_cpu_reason = describe()
+                log.warning("Нехватка видеопамяти при загрузке: %s", exc)
+                self.graph = None
+                model = None  # noqa: F841 — отпускаем веса на видеокарте
+                self._free_cuda()
+                self._load_cpu_retry()
+                return
+            if precision == "int8" and device == "cpu":
+                model.encoder = torch.ao.quantization.quantize_dynamic(
+                    model.encoder, {torch.nn.Linear}, dtype=torch.qint8)
+            if device == "cpu":
                 self.graph = None
                 self.device_label = "CPU"
             self.model, self.device, self.precision = model, device, precision
@@ -311,7 +346,10 @@ class ASREngine:
             self.state = "ready"
             self.last_used = time.monotonic()
             took = time.perf_counter() - started
-            self.on_status("ready", f"{self.device_label} · {precision.upper()} · загрузка {took:.1f} с")
+            if device == "cpu" and self.force_cpu_reason:
+                self.on_status("degraded", self.force_cpu_reason)
+            else:
+                self.on_status("ready", f"{self.device_label} · {precision.upper()} · загрузка {took:.1f} с")
             log.info("Модель загружена: %s %s за %.1f с", device, precision, took)
         except Exception as exc:  # noqa: BLE001
             log.exception("Не удалось загрузить модель")
@@ -325,13 +363,46 @@ class ASREngine:
         self.model = None
         self.graph = None
         self.state = "unloaded"
+        self._free_cuda()
+
+    def _free_cuda(self) -> None:
         if self.torch is not None and self.torch.cuda.is_available():
             import gc
             gc.collect()
-            self.torch.cuda.empty_cache()
+            try:
+                self.torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _load_cpu_retry(self) -> None:
+        """Загрузить модель на процессор после нехватки видеопамяти."""
+        self.model = None
+        self.graph = None
+        self._free_cuda()
+        self._load()
+
+    def _to_cpu_after_oom(self, exc: Exception) -> None:
+        from ..gpu import describe
+        self.force_cpu_reason = describe()
+        log.warning("Нехватка видеопамяти во время распознавания (%s) — перехожу на CPU", exc)
+        self.model = None
+        self.graph = None
+        self._load_cpu_retry()
 
     # -------------------------------------------------------- распознавание
     def _transcribe(self, wav: np.ndarray) -> str:
+        try:
+            return self._transcribe_once(wav)
+        except Exception as exc:  # noqa: BLE001
+            if self.device != "cuda" or not _is_oom(exc):
+                raise
+            # Кто-то занял видеопамять уже после загрузки (например, Ollama подняла модель).
+            self._to_cpu_after_oom(exc)
+            if self.model is None:
+                raise
+            return self._transcribe_once(wav)
+
+    def _transcribe_once(self, wav: np.ndarray) -> str:
         torch = self.torch
         if wav.size < FRAME:
             return ""
@@ -516,6 +587,12 @@ class ASREngine:
         }
         self._session = None
         self.on_final(sess.sid, final_text, info)
+
+
+def _is_oom(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return exc.__class__.__name__ == "OutOfMemoryError" or "out of memory" in text \
+        or "cublas_status_alloc_failed" in text or "cudaerrormemoryallocation" in text
 
 
 def join_texts(parts: list) -> str:
