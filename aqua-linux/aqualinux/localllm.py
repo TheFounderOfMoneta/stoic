@@ -185,6 +185,53 @@ def model_file(repo_override: str = "", quant: str = "Q4_K_M") -> tuple[str, str
     raise InstallError("Не нашёл GGUF-файл Qwen3.5-0.8B на Hugging Face. " + "; ".join(errors))
 
 
+# ---------------------------------------------------------------- уже установленное
+CUDA_LIBS = ("libcudart.so.12", "libcublas.so.12", "libcublasLt.so.12")
+KNOWN_VENVS = (Path("/home/vlad/Documents/Codex/2026-10-05/new-chat-3/outputs/gigaam/.venv"),)
+
+
+def find_cuda_libs() -> dict[str, Path]:
+    """CUDA 12 runtime, который уже есть на компьютере: Ollama, PyTorch (pip nvidia-*), системный."""
+    dirs: list[Path] = []
+    for root in (Path("/usr/local/lib/ollama"), Path("/usr/lib/ollama"), Path.home() / ".ollama/lib"):
+        if root.is_dir():
+            dirs += sorted(p.parent for p in root.rglob("libcudart.so.12*"))
+            dirs += sorted(p.parent for p in root.rglob("libcublas.so.12*"))
+    site_dirs = [Path(p) for p in sys.path if p.endswith("site-packages")]
+    for venv in KNOWN_VENVS:
+        site_dirs += list(venv.glob("lib/python3*/site-packages"))
+    for site in site_dirs:
+        dirs += [site / "nvidia/cuda_runtime/lib", site / "nvidia/cublas/lib"]
+    dirs += [Path(p) for p in ("/usr/local/cuda/lib64", "/usr/lib/x86_64-linux-gnu")]
+    found: dict[str, Path] = {}
+    for name in CUDA_LIBS:
+        for d in dirs:
+            hits = sorted(d.glob(name + "*")) if d.is_dir() else []
+            if hits:
+                found[name] = hits[0].resolve()
+                break
+    return found if len(found) == len(CUDA_LIBS) else {}
+
+
+def find_llama_server() -> Optional[Path]:
+    """Уже собранный/установленный llama-server с поддержкой видеокарты."""
+    candidates = [shutil.which("llama-server")]
+    home = Path.home()
+    for rel in ("llama.cpp/build/bin/llama-server", "llama.cpp/llama-server", ".local/bin/llama-server",
+                "src/llama.cpp/build/bin/llama-server"):
+        candidates.append(str(home / rel))
+    for c in candidates:
+        if not c or not Path(c).is_file() or "aqua-linux" in c:
+            continue
+        try:
+            out = subprocess.run([c, "--list-devices"], capture_output=True, text=True, timeout=20)
+            if re.search(r"(CUDA|Vulkan)\d+:.*(nvidia|geforce|gtx|rtx)", out.stdout + out.stderr, re.IGNORECASE):
+                return Path(c).resolve()
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
 # ---------------------------------------------------------------- железо
 def detect_backend() -> str:
     if Path("/proc/driver/nvidia/version").exists() or shutil.which("nvidia-smi"):
@@ -251,6 +298,9 @@ class LocalLLM:
 
     def installed(self, backend: Optional[str] = None) -> bool:
         backend = backend or self.wanted_backend()
+        if backend == "cuda" and not self.server_path(backend).is_symlink() \
+                and not (self.engine_dir(backend) / "libcudart.so.12").exists():
+            return False   # движок есть, а рантайма CUDA рядом нет (например, загрузку прервали)
         return self.server_path(backend).exists() and self.model_path() is not None
 
     @property
@@ -273,19 +323,39 @@ class LocalLLM:
     def install(self, backend: Optional[str] = None) -> None:
         backend = backend or self.wanted_backend()
         LLM_DIR.mkdir(parents=True, exist_ok=True)
+        engine = self.engine_dir(backend)
+        if not self.server_path(backend).exists() and backend != "cpu":
+            existing = find_llama_server()
+            if existing is not None:
+                engine.mkdir(parents=True, exist_ok=True)
+                self.server_path(backend).symlink_to(existing)
+                log.info("Использую уже установленный llama-server: %s", existing)
         if not self.server_path(backend).exists():
             assets = release_assets(backend)
-            for i, (name, url) in enumerate(assets):
-                label = "рантайм CUDA" if name.startswith("cudart") else "движок llama.cpp"
+            for name, url in assets:
+                is_cudart = name.startswith("cudart")
+                if is_cudart and self._link_cuda_libs(engine):
+                    continue   # CUDA уже есть на компьютере — 600 МБ не качаем
+                label = "рантайм CUDA" if is_cudart else "движок llama.cpp"
                 archive = LLM_DIR / "downloads" / name
                 if not archive.exists():
                     download(url, archive, lambda d, t, label=label: self._set(
                         "installing", f"Скачиваю {label}… {d / 1e6:.0f} из {t / 1e6:.0f} МБ", d / t if t else -1))
                 self._set("installing", f"Распаковываю {label}…")
-                extract(archive, self.engine_dir(backend))
+                extract(archive, engine)
                 archive.unlink(missing_ok=True)
             if not self.server_path(backend).exists():
                 raise InstallError("В архиве llama.cpp нет llama-server")
+        if backend == "cuda" and not self.server_path(backend).is_symlink() \
+                and not (engine / "libcudart.so.12").exists() and not self._link_cuda_libs(engine):
+            for name, url in release_assets(backend):
+                if name.startswith("cudart"):
+                    archive = LLM_DIR / "downloads" / name
+                    download(url, archive, lambda d, t: self._set(
+                        "installing", f"Скачиваю рантайм CUDA… {d / 1e6:.0f} из {t / 1e6:.0f} МБ",
+                        d / t if t else -1))
+                    extract(archive, engine)
+                    archive.unlink(missing_ok=True)
         if self.model_path() is None:
             self._set("installing", "Ищу модель Qwen3.5-0.8B…")
             quant = self.settings.get("llm.builtin_quant") or "Q4_K_M"
@@ -298,6 +368,41 @@ class LocalLLM:
             name, url = model_file(self.settings.get("llm.builtin_repo") or "", quant)
             download(url, MODEL_DIR / name, lambda d, t: self._set(
                 "installing", f"Скачиваю модель Qwen3.5-0.8B… {d / 1e6:.0f} из {t / 1e6:.0f} МБ", d / t if t else -1))
+
+    def _link_cuda_libs(self, engine: Path) -> bool:
+        libs = find_cuda_libs()
+        if not libs:
+            return False
+        engine.mkdir(parents=True, exist_ok=True)
+        for name, path in libs.items():
+            target = engine / name
+            if target.exists() or target.is_symlink():
+                target.unlink()
+            target.symlink_to(path)
+        (engine / ".cuda-libs-reused").write_text("\n".join(str(p) for p in libs.values()))
+        log.info("CUDA уже установлена — использую: %s", ", ".join(str(p) for p in libs.values()))
+        return True
+
+    def _download_cudart(self, backend: str) -> bool:
+        """Если с найденной CUDA сервер не стартовал — докачиваем родной рантайм llama.cpp."""
+        engine = self.engine_dir(backend)
+        marker = engine / ".cuda-libs-reused"
+        if not marker.exists():
+            return False
+        marker.unlink()
+        for name, url in release_assets(backend):
+            if not name.startswith("cudart"):
+                continue
+            for lib in CUDA_LIBS:
+                if (engine / lib).is_symlink():
+                    (engine / lib).unlink()
+            archive = LLM_DIR / "downloads" / name
+            download(url, archive, lambda d, t: self._set(
+                "installing", f"Скачиваю рантайм CUDA… {d / 1e6:.0f} из {t / 1e6:.0f} МБ", d / t if t else -1))
+            extract(archive, engine)
+            archive.unlink(missing_ok=True)
+            return True
+        return False
 
     def remove(self) -> None:
         self.stop()
@@ -359,6 +464,12 @@ class LocalLLM:
                         return False
                 if self._launch(candidate, timeout):
                     return True
+                if candidate == "cuda":
+                    try:
+                        if self._download_cudart(candidate) and self._launch(candidate, timeout):
+                            return True
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("Рантайм CUDA не скачался: %s", exc)
                 log.warning("Не удалось запустить llama-server (%s), пробую следующий вариант", candidate)
             self._set("error", "ИИ не запустился — подробности в журнале llama-server.log")
             return False
@@ -453,6 +564,55 @@ class LocalLLM:
             self._set("stopped" if self.installed() else "absent", "")
 
 
+# ---------------------------------------------------------------- Ollama
+MODELFILE = """FROM {gguf}
+
+PARAMETER num_ctx 4096
+PARAMETER num_batch 512
+PARAMETER num_thread 6
+
+PARAMETER temperature 1.0
+PARAMETER top_p 1.0
+PARAMETER top_k 20
+PARAMETER min_p 0.0
+PARAMETER presence_penalty 2.0
+PARAMETER repeat_penalty 1.0
+
+SYSTEM \"\"\"Отвечай на языке пользователя. По умолчанию отвечай по-русски. Пиши грамотно и естественно. \
+Строго соблюдай заданный формат, число пунктов и ограничения длины. Если просят только JSON, выводи чистый JSON \
+без Markdown.\"\"\"
+"""
+
+
+def ollama_setup(settings: Settings, name: str = "qwen3.5:0.8b-local") -> int:
+    """Использовать Ollama: готовую модель Qwen3.5-0.8B или создать её из GGUF на диске. 0 — получилось."""
+    from .corrector import ollama_models, pick_qwen_small
+    url = settings.get("llm.ollama_url") or "http://127.0.0.1:11434"
+    models = ollama_models(url)
+    if not models and not shutil.which("ollama"):
+        print("Ollama не найдена.")
+        return 2
+    found = pick_qwen_small(models)
+    if not found:
+        gguf = find_local_gguf(settings.get("llm.builtin_quant") or "Q4_K_M")
+        if gguf is None or not shutil.which("ollama"):
+            print("В Ollama нет Qwen3.5-0.8B, и GGUF-файл на диске не найден.")
+            return 3
+        modelfile = LLM_DIR / "Modelfile"
+        modelfile.parent.mkdir(parents=True, exist_ok=True)
+        modelfile.write_text(MODELFILE.format(gguf=gguf), encoding="utf-8")
+        print(f"Создаю модель {name} из {gguf} …")
+        if subprocess.run(["ollama", "create", name, "-f", str(modelfile)]).returncode != 0:
+            return 4
+        found = name
+    settings.set("llm.provider", "ollama")
+    settings.set("llm.ollama_model", found)
+    settings.set("llm.correct", True)
+    settings.set("llm.enabled", True)
+    print(f"Готово: Aqua использует Ollama · {found}")
+    return 0
+
+
 # ---------------------------------------------------------------- CLI
 def main(argv=None) -> int:
     import argparse
@@ -462,11 +622,12 @@ def main(argv=None) -> int:
     inst.add_argument("--enable", action="store_true", help="сразу включить улучшение текста")
     inst.add_argument("--backend", choices=["auto", "cuda", "vulkan", "cpu"], default=None)
     sub.add_parser("status")
+    sub.add_parser("ollama-setup", help="использовать Ollama (создать qwen3.5:0.8b-local из найденного GGUF)")
     test = sub.add_parser("test", help="запустить сервер и исправить пример")
     test.add_argument("text", nargs="?", default="скинь мне пожалуйста ссылку на гит хаб репозиторий "
                                                  "я хотел спросить на счёт встречи в пятницу")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")   # прогресс печатает show()
     settings = Settings()
 
     def show(state, message, progress):
@@ -486,6 +647,8 @@ def main(argv=None) -> int:
             settings.set("llm.enabled", True)
             print("Улучшение текста включено.")
         return 0
+    if args.cmd == "ollama-setup":
+        return ollama_setup(settings)
     if args.cmd == "status":
         print("Сборка:", llm.wanted_backend(), "установлена" if llm.installed() else "не установлена")
         print("Модель:", llm.model_path() or "нет")
