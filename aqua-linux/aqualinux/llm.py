@@ -6,12 +6,15 @@
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import re
+import ssl
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -63,25 +66,144 @@ _ds_lock = threading.Lock()
 _ds_state = {"thinking_param": True, "model": None}
 
 
-def _post(url: str, body: dict, key: str, timeout: float) -> dict:
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
-                                 headers={"Content-Type": "application/json"})
-    if key:
-        req.add_header("Authorization", f"Bearer {key}")
-    try:
-        with urllib.request.urlopen(req, timeout=max(0.3, timeout)) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
+class _ConnPool:
+    """Постоянные HTTP(S)-соединения: без нового TLS-рукопожатия на каждый запрос
+    (до DeepSeek это ~0,1–0,3 с). Соединение открывается заранее, пока человек говорит."""
+
+    def __init__(self):
+        self._idle: dict[tuple, list] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(url: str) -> tuple:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        return parts.scheme, parts.hostname, port
+
+    @staticmethod
+    def _new(key: tuple, timeout: float):
+        scheme, host, port = key
+        if scheme == "https":
+            return http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context())
+        return http.client.HTTPConnection(host, port, timeout=timeout)
+
+    def _take(self, key: tuple):
+        with self._lock:
+            conns = self._idle.get(key) or []
+            while conns:
+                conn, since = conns.pop()
+                if time.monotonic() - since < 50:      # сервер мог закрыть старое соединение
+                    return conn
+                conn.close()
+        return None
+
+    def _give(self, key: tuple, conn) -> None:
+        with self._lock:
+            conns = self._idle.setdefault(key, [])
+            if len(conns) < 4:
+                conns.append((conn, time.monotonic()))
+                return
+        conn.close()
+
+    def post(self, url: str, payload: bytes, headers: dict, timeout: float) -> tuple[int, bytes]:
+        key = self._key(url)
+        parts = urllib.parse.urlsplit(url)
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        for attempt in range(2):
+            conn = self._take(key)
+            fresh = conn is None
+            if fresh:
+                conn = self._new(key, timeout)
+            conn.timeout = timeout
+            if conn.sock is not None:
+                conn.sock.settimeout(timeout)
+            try:
+                conn.request("POST", path, body=payload, headers=headers)
+                resp = conn.getresponse()
+                data = resp.read()
+            except (http.client.RemoteDisconnected, http.client.CannotSendRequest, http.client.BadStatusLine,
+                    BrokenPipeError, ConnectionResetError) as exc:
+                conn.close()
+                if fresh or attempt:
+                    raise LLMError(str(exc) or exc.__class__.__name__) from exc
+                continue      # сервер закрыл простаивавшее соединение — ещё раз на новом
+            except Exception:
+                conn.close()
+                raise
+            if resp.will_close:
+                conn.close()
+            else:
+                self._give(key, conn)
+            return resp.status, data
+        raise LLMError("соединение не установлено")
+
+    def preconnect(self, url: str, timeout: float = 5.0) -> None:
+        """Заранее открыть соединение (TCP+TLS), если свободного нет."""
+        key = self._key(url)
+        with self._lock:
+            fresh = [c for c, since in self._idle.get(key, []) if time.monotonic() - since < 40]
+        if fresh:
+            return
+        conn = self._new(key, timeout)
         try:
-            detail = exc.read()[:400].decode("utf-8", "replace")
+            conn.connect()
+        except OSError:
+            conn.close()
+            return
+        self._give(key, conn)
+
+
+_pool = _ConnPool()
+
+
+def _uses_proxy(url: str) -> bool:
+    host = urllib.parse.urlsplit(url).hostname or ""
+    proxies = urllib.request.getproxies()
+    if not proxies or host in ("127.0.0.1", "localhost", "::1"):
+        return False
+    try:
+        if urllib.request.proxy_bypass(host):
+            return False
+    except Exception:  # noqa: BLE001
+        pass
+    return bool(proxies.get(urllib.parse.urlsplit(url).scheme) or proxies.get("all"))
+
+
+def preconnect(url: str) -> None:
+    if url and not _uses_proxy(url):
+        try:
+            _pool.preconnect(url.rstrip("/") + "/")
         except Exception:  # noqa: BLE001
-            detail = ""
-        raise LLMError(f"HTTP {exc.code}: {detail}", status=exc.code,
-                       fatal=exc.code in (401, 402, 403)) from exc
+            pass
+
+
+def _post(url: str, body: dict, key: str, timeout: float) -> dict:
+    payload = json.dumps(body).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    timeout = max(0.3, timeout)
+    try:
+        if _uses_proxy(url):
+            req = urllib.request.Request(url, data=payload, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    status, data = resp.status, resp.read()
+            except urllib.error.HTTPError as exc:
+                status, data = exc.code, exc.read()
+        else:
+            status, data = _pool.post(url, payload, headers, timeout)
     except LLMError:
         raise
     except Exception as exc:  # noqa: BLE001 — нет сети, таймаут, DNS
         raise LLMError(str(exc) or exc.__class__.__name__) from exc
+    if status >= 400:
+        detail = data[:400].decode("utf-8", "replace")
+        raise LLMError(f"HTTP {status}: {detail}", status=status, fatal=status in (401, 402, 403))
+    try:
+        return json.loads(data.decode("utf-8"))
+    except ValueError as exc:
+        raise LLMError(f"Неожиданный ответ: {data[:200]!r}") from exc
 
 
 def request(provider: Provider, messages: list[dict], *, max_tokens: int, timeout_s: float,
@@ -232,6 +354,7 @@ class Router:
         self.last_cloud_error = ""
         self.last_used = ""
         self.on_cloud_failed: Optional[Callable[[str, bool], None]] = None   # (объяснение, фатально)
+        self.on_cloud_ok: Optional[Callable[[], None]] = None               # DeepSeek снова отвечает
         self.on_need_local: Optional[Callable[[], None]] = None             # запустить запасную модель
 
     # ------------------------------------------------------------ состав
@@ -311,7 +434,13 @@ class Router:
                 if provider.cloud:
                     with self._lock:
                         self._cloud_off_until = 0.0
-                    self.last_cloud_error = ""
+                    if self.last_cloud_error:
+                        self.last_cloud_error = ""
+                        if self.on_cloud_ok:
+                            try:
+                                self.on_cloud_ok()
+                            except Exception:  # noqa: BLE001
+                                pass
                 return text, provider
             except LLMError as exc:
                 errors.append(f"{provider.kind}: {exc}")

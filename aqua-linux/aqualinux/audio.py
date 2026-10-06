@@ -151,6 +151,22 @@ class _TempEnv:
         self._lock.release()
 
 
+def friendly_mic_error(exc: Exception) -> str:
+    """Понятное объяснение ошибки PortAudio вместо «[PaErrorCode -9985]»."""
+    text = str(exc).lower()
+    if "portaudio" in text and ("not found" in text or "libportaudio" in text):
+        return "не установлен PortAudio (sudo apt install libportaudio2)"
+    if "-9985" in text or "unavailable" in text or "busy" in text:
+        return "занят другой программой или отключён"
+    if "-9996" in text or "no default input" in text or "invalid device" in text or "-9998" in text:
+        return "не найден — подключите микрофон или выберите другой в настройках"
+    if "-9997" in text or "sample rate" in text:
+        return "не поддерживает нужную частоту"
+    if "permission" in text or "-9999" in text:
+        return "нет доступа к звуковой системе"
+    return "не удалось включить"
+
+
 def level_from_block(block: np.ndarray) -> float:
     """RMS → 0..1 по шкале -58…-8 дБФС."""
     rms = float(np.sqrt(np.mean(np.square(block), dtype=np.float64))) if block.size else 0.0
@@ -318,6 +334,24 @@ class Recorder:
                     except Exception:  # noqa: BLE001
                         log.exception("Ошибка в обработчике аудио")
                 self._sink = sink
+
+    def reopen(self, device) -> bool:
+        """Переоткрыть поток с тем же приёмником (микрофон «замолчал»: USB, перезапуск PipeWire)."""
+        with self._lock:
+            with self._sink_lock:
+                sink = self._sink
+                self._sink = None
+            self._close()
+            try:
+                self._open(device)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Не удалось переоткрыть микрофон %r: %s", device, exc)
+                with self._sink_lock:
+                    self._sink = sink
+                return False
+            with self._sink_lock:
+                self._sink = sink
+            return True
 
     def stop(self, sink=None, close: bool = True) -> bool:
         """Отключить приёмник (если передан — только его). Поток закрывается, когда

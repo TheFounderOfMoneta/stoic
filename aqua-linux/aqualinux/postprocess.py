@@ -5,6 +5,7 @@ import difflib
 import re
 from dataclasses import dataclass
 
+from . import terms as builtin_terms
 from .numbers import normalize as normalize_numbers
 
 # Звуки-заминки, которые никогда не бывают смысловыми словами.
@@ -190,6 +191,27 @@ class TextProcessor:
         text = re.sub(r" +([,.!?…:;])", r"\1", text)
         return text.strip()
 
+    def apply_terms(self, text: str, settings) -> tuple[str, list[str]]:
+        """Встроенная база терминов (GitHub, Docker, SQL…), после словаря пользователя."""
+        if not settings.get("text.builtin_terms", True):
+            return text, []
+        try:
+            return builtin_terms.index().apply(text)
+        except Exception:  # noqa: BLE001 — база не должна ломать диктовку
+            return text, []
+
+    def pre(self, raw: str, settings) -> tuple[str, list[str]]:
+        """Подготовка к ИИ: словарь пользователя и встроенные термины (без остальной обработки).
+        Возвращает (текст, термины, найденные в нём) — их подсказываем ИИ."""
+        text = raw.strip()
+        if not text:
+            return "", []
+        text = self.apply_dictionary(text, settings.get("text.fuzzy_dictionary", True),
+                                     float(settings.get("text.fuzzy_threshold", 0.84)))
+        text, found = self.apply_terms(text, settings)
+        user_terms = [e.term for e in self.entries if e.term in text]
+        return text, list(dict.fromkeys(user_terms + found))
+
     def process(self, raw: str, settings) -> str:
         text = raw.strip()
         if not text:
@@ -200,6 +222,7 @@ class TextProcessor:
             text = self.voice_commands(text)
         text = self.apply_dictionary(text, settings.get("text.fuzzy_dictionary", True),
                                      float(settings.get("text.fuzzy_threshold", 0.84)))
+        text = self.apply_terms(text, settings)[0]
         if settings.get("text.numbers", True):
             text = normalize_numbers(text, settings.get("text.number_style", "sign") or "sign")
         text = self.capitalize_sentences(text)

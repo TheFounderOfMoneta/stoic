@@ -801,6 +801,8 @@ class MainWindow(QMainWindow):
         text.add_row("«Отправь» отправляет сообщение", "Скажите «Отправь.» в конце — нажмётся Enter.",
                      bind_switch(s, "insert.send_it"))
         text.add_row("Убирать «э-э», «мм»", "", bind_switch(s, "text.remove_fillers"))
+        text.add_row("Встроенный словарь терминов", "Около 4 тыс. названий: «гитхаб» → GitHub, «докером» → Docker, "
+                     "«эс кью эль» → SQL. Ваши слова в «Словаре» важнее.", bind_switch(s, "text.builtin_terms"))
         text.add_row("Числа цифрами", "«номер один» → «№ 1», «двадцать пять» → «25».",
                      bind_switch(s, "text.numbers"))
         text.add_row("Как писать номер", "", bind_combo(s, "text.number_style", [("sign", "№ 5"),

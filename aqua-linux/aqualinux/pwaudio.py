@@ -226,6 +226,16 @@ def fix_gain(setting_value=None, clipped_ratio: float = 0.0) -> tuple[bool, str]
                    "Вход и уменьшите громкость микрофона примерно до трети.")
 
 
+def restore_volume(src: Optional[Source]) -> bool:
+    """Вернуть громкость источника, какой она была до автоматического снижения."""
+    pactl = shutil.which("pactl")
+    if src is None or src.volume_db is None or not pactl or not math.isfinite(src.volume_db):
+        return False
+    _run([pactl, "set-source-volume", src.name, f"{10 ** (src.volume_db / 20.0):.6f}"])
+    invalidate()
+    return True
+
+
 def _wpctl_id(node_name: str) -> Optional[str]:
     raw = _run(["pw-dump"], timeout=3.0) if shutil.which("pw-dump") else ""
     try:

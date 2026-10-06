@@ -32,10 +32,15 @@ SHIFT_INSERT_CLASSES = {"xterm", "uxterm", "urxvt", "rxvt", "urxvt-unicode", "st
 
 
 class WindowInfo:
-    def __init__(self, wm_class: str = "", title: str = "", pid: Optional[int] = None):
+    def __init__(self, wm_class: str = "", title: str = "", pid: Optional[int] = None, instance: str = ""):
         self.wm_class = wm_class
+        self.instance = instance        # первая часть WM_CLASS (gnome-terminal-server), класс — вторая
         self.title = title
         self.pid = pid
+
+    @property
+    def names(self) -> set[str]:
+        return {n.lower() for n in (self.wm_class, self.instance) if n}
 
     @property
     def app(self) -> str:
@@ -61,12 +66,18 @@ class X11Desktop:
             return WindowInfo()
         try:
             prop = self.root.get_full_property(self.NET_ACTIVE, Xatom.WINDOW)
-            if not prop or not prop.value or not prop.value[0]:
-                return WindowInfo()
-            win = self.dpy.create_resource_object("window", prop.value[0])
-            wm_class = ""
+            if prop and prop.value and prop.value[0]:
+                win = self.dpy.create_resource_object("window", prop.value[0])
+            else:
+                # Нет _NET_ACTIVE_WINDOW (фокус на рабочем столе, редкие окна, без оконного
+                # менеджера) — берём окно с фокусом клавиатуры и поднимаемся до окна с WM_CLASS.
+                win = self._focus_toplevel()
+                if win is None:
+                    return WindowInfo()
+            wm_class = instance = ""
             cls = win.get_wm_class()
             if cls:
+                instance = cls[0] or ""
                 wm_class = cls[1] or cls[0] or ""
             title = ""
             name = win.get_full_property(self.NET_NAME, self.UTF8)
@@ -76,10 +87,34 @@ class X11Desktop:
                 title = win.get_wm_name() or ""
             pid_prop = win.get_full_property(self.NET_PID, Xatom.CARDINAL)
             pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else None
-            return WindowInfo(wm_class, title, pid)
+            return WindowInfo(wm_class, title, pid, instance)
         except Exception:  # noqa: BLE001
             log.debug("Не удалось определить активное окно", exc_info=True)
             return WindowInfo()
+
+    def _focus_toplevel(self):
+        focus = self.dpy.get_input_focus().focus
+        if not focus or isinstance(focus, int):
+            return None
+        win = focus
+        for _ in range(12):
+            try:
+                if win.get_wm_class():
+                    return win
+                parent = win.query_tree().parent
+            except Exception:  # noqa: BLE001
+                return None
+            if not parent or parent == self.root or parent.id == self.root.id:
+                return None
+            win = parent
+        return None
+
+    def reconnect(self) -> None:
+        """Соединение с X-сервером оборвалось — открыть новое."""
+        try:
+            self.__init__()
+        except Exception:  # noqa: BLE001
+            log.warning("X-сервер пока недоступен", exc_info=True)
 
     # ---------------------------------------------------------- клавиатура
     def _keycode(self, name: str) -> int:
@@ -87,6 +122,15 @@ class X11Desktop:
         return self.dpy.keysym_to_keycode(keysym) if keysym else 0
 
     def send_combo(self, modifiers: list[str], key: str) -> bool:
+        for attempt in range(2):
+            try:
+                return self._send_combo(modifiers, key)
+            except Exception:  # noqa: BLE001 — оборвалось соединение с X: переподключаемся и повторяем
+                log.warning("Не удалось отправить клавиши — переподключаюсь к X", exc_info=True)
+                self.reconnect()
+        return False
+
+    def _send_combo(self, modifiers: list[str], key: str) -> bool:
         if self.dpy is None:
             return False
         codes = [self._keycode(m) for m in modifiers]
@@ -134,10 +178,10 @@ class X11Desktop:
         self.dpy.sync()
 
     def paste_keys_for(self, window: WindowInfo, terminal_shift: bool = True) -> tuple[list[str], str]:
-        cls = (window.wm_class or "").lower()
-        if cls in SHIFT_INSERT_CLASSES:
+        names = window.names
+        if names & SHIFT_INSERT_CLASSES:
             return ["Shift_L"], "Insert"
-        if terminal_shift and (cls in TERMINAL_CLASSES or cls.endswith("terminal")):
+        if terminal_shift and (names & TERMINAL_CLASSES or any(n.endswith("terminal") for n in names)):
             return ["Control_L", "Shift_L"], "v"
         return ["Control_L"], "v"
 

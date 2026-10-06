@@ -565,19 +565,31 @@ class LocalLLM:
         self._thread.start()
 
     def _supervise(self) -> None:
+        """Держит сервер запущенным: упал — перезапуск с паузой 2, 4, 8… с (до 5 раз подряд;
+        если сервер проработал 5 минут, счётчик сбрасывается)."""
         restarts = 0
         while not self._stopping:
+            started_at = time.monotonic()
             if not self.start():
-                return
+                if self._stopping or restarts >= 5:
+                    return
+                restarts += 1
+                time.sleep(min(60, 2 ** restarts))
+                continue
             proc = self.proc
             while proc is not None and proc.poll() is None and not self._stopping:
                 time.sleep(0.5)
-            if self._stopping or restarts >= 1:
-                if not self._stopping:
-                    self._set("error", "ИИ неожиданно остановился — подробности в llama-server.log")
+            if self._stopping:
+                return
+            if time.monotonic() - started_at > 300:
+                restarts = 0
+            if restarts >= 5:
+                self._set("error", "ИИ неожиданно останавливается — подробности в llama-server.log")
                 return
             restarts += 1
-            log.warning("llama-server завершился (код %s), перезапускаю", proc.returncode if proc else None)
+            log.warning("llama-server завершился (код %s), перезапуск №%d", proc.returncode if proc else None,
+                        restarts)
+            time.sleep(min(30, 2 ** restarts))
 
     def _terminate(self) -> None:
         proc, self.proc = self.proc, None

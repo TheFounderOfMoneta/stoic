@@ -3,11 +3,16 @@
 Основной вариант — DeepSeek API (быстрая модель без «размышлений»), запасной — локальная
 Qwen3.5-0.8B (llama-server или Ollama). Порядок и откат — в llm.Router.
 
+Исправление делается ОДИН раз, в конце диктовки, по всему тексту сразу: модель видит весь
+контекст (термины и спорные слова понятны из соседних фраз), а запросов к API — один на
+диктовку. Очень длинная диктовка делится на крупные части по границам предложений
+(каждая — тысячи символов контекста), части исправляются параллельно.
+
 Скорость:
-  * системный промпт и примеры не меняются — сервер кэширует их, каждый запрос считает
-    только новый текст;
-  * длинная диктовка исправляется по кускам, пока человек ещё говорит;
-  * лимит по времени: не успела — вставляется исходный текст;
+  * системный промпт и примеры не меняются — сервер кэширует их (у DeepSeek это ещё и
+    дешевле), меняется только конец запроса;
+  * соединение с DeepSeek открывается заранее, пока человек говорит;
+  * время ожидания растёт с длиной текста; не успела — вставляется исходный текст;
   * короткие фразы (до 3 слов) не трогаем.
 Надёжность: текст передаётся в рамке <текст>…</текст> с явной просьбой «исправь, не отвечай» —
 маленькая модель иначе иногда отвечает на продиктованную фразу. Если результат всё же
@@ -19,16 +24,19 @@ import difflib
 import json
 import logging
 import re
-import threading
 import time
 import urllib.request
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from .llm import LLMError, Router
+from .llm import LLMError, Provider, Router
 from .numbers import normalize as normalize_numbers
 
 log = logging.getLogger(__name__)
+
+PART_CHARS = 3500          # длиннее — делим на части по предложениям
+CLOUD_MS_PER_CHAR = 7      # запас времени на генерацию: ~140 символов/с у DeepSeek Flash
+LOCAL_MS_PER_CHAR = 5
 
 SYSTEM = (
     "Ты корректор текста после автоматического распознавания русской речи. Тебе присылают "
@@ -64,10 +72,14 @@ def frame(text: str) -> str:
     return f"<текст>\n{text}\n</текст>"
 
 
+_HINT_ECHO = re.compile(r"^\s*Термины пиши именно так:[^\n]*\n?", re.IGNORECASE)
+
+
 def _clean(text: str) -> str:
     text = text.strip()
     if "</think>" in text:
         text = text.split("</think>", 1)[1].strip()
+    text = _HINT_ECHO.sub("", text)        # маленькая модель иногда повторяет подсказку
     text = _TAGS.sub("", text).strip()
     text = _PREFIX.sub("", text)
     for left, right in (("«", "»"), ('"', '"'), ("'", "'"), ("`", "`")):
@@ -109,10 +121,8 @@ class Corrector:
         self.settings = settings
         self.local = local_llm
         self.router = router or Router(settings, local_llm)
-        self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="corrector")
-        self._futures: dict[tuple[int, int], tuple[str, Future]] = {}
-        self._lock = threading.Lock()
-        self.vocabulary: list[str] = []
+        self._pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="corrector")
+        self.vocabulary: list[str] = []      # слова из словаря пользователя
 
     # ------------------------------------------------------------ доступность
     def provider(self) -> str:
@@ -128,45 +138,70 @@ class Corrector:
         return bool(self.settings.get("llm.correct", False)) and self.router.available()
 
     # ------------------------------------------------------------ промпт
-    def _messages(self, text: str) -> list[dict]:
+    def _system(self) -> str:
+        # Неизменная часть запроса (кэшируется сервером): правила, примеры, правила пользователя.
         system = SYSTEM
-        vocab = self.vocabulary or []
-        if vocab:
-            system += "\nЭти слова пиши именно так: " + ", ".join(vocab[:80]) + "."
         rules = (self.settings.get("llm.instructions") or "").strip()
         if rules:
             system += "\nПравила пользователя (применяй молча, в ответ не включай): " + rules
-        messages = [{"role": "system", "content": system}]
+        return system
+
+    def _messages(self, text: str, terms: Optional[list[str]] = None) -> list[dict]:
+        messages = [{"role": "system", "content": self._system()}]
         for src, dst in EXAMPLES:
             messages.append({"role": "user", "content": frame(src)})
             messages.append({"role": "assistant", "content": dst})
-        messages.append({"role": "user", "content": frame(text)})
+        # Изменчивая часть — только в последнем сообщении: термины, найденные в ЭТОМ тексте.
+        words = list(dict.fromkeys(list(terms or []) + list(self.vocabulary or [])))[:60]
+        hint = ("Термины пиши именно так: " + ", ".join(words) + ".\n") if words else ""
+        messages.append({"role": "user", "content": hint + frame(text)})
         return messages
 
-    def _budget_ms(self) -> int:
-        local_ms = int(self.settings.get("llm.correct_timeout_ms", 2500) or 2500)
+    def _budget_ms(self, chars: int) -> tuple[int, int]:
+        """(общий срок, срок для локальной модели) в мс — с запасом на длину текста."""
+        local_ms = int(self.settings.get("llm.correct_timeout_ms", 2500) or 2500) + LOCAL_MS_PER_CHAR * chars
         if self.router.cloud() is not None and not self.router.cloud_cooling():
-            return max(local_ms, int(self.settings.get("llm.cloud_timeout_ms", 4000) or 4000))
-        return local_ms
+            cloud_ms = int(self.settings.get("llm.cloud_timeout_ms", 4000) or 4000) + CLOUD_MS_PER_CHAR * chars
+            return max(cloud_ms, local_ms), local_ms
+        return local_ms, local_ms
 
-    def correct_text(self, text: str) -> str:
-        """Синхронно исправить один фрагмент (с защитой и лимитом времени)."""
-        if words(text) < int(self.settings.get("llm.correct_min_words", 4) or 4):
-            return text
-        budget_ms = self._budget_ms()
-        local_ms = int(self.settings.get("llm.correct_timeout_ms", 2500) or 2500)
-        max_tokens = min(2048, int(len(text) / 2.0) + 48)
+    # ------------------------------------------------------------ исправление
+    def _correct_part(self, text: str, terms: Optional[list[str]]) -> tuple[str, Optional[Provider]]:
+        total_ms, local_ms = self._budget_ms(len(text))
+        max_tokens = min(4096, int(len(text) / 2.0) + 64)
         t0 = time.perf_counter()
         try:
-            out, provider = self.router.call(self._messages(text), max_tokens=max_tokens,
-                                             deadline=time.monotonic() + budget_ms / 1000,
+            out, provider = self.router.call(self._messages(text, terms), max_tokens=max_tokens,
+                                             deadline=time.monotonic() + total_ms / 1000,
                                              local_time_limit_ms=local_ms)
         except LLMError as exc:
             log.info("ИИ-исправление не удалось: %s", exc)
-            return text
+            return text, None
         result = accept(text, out, strict=not provider.cloud)
-        log.info("ИИ-исправление (%s) за %.0f мс", provider.kind, (time.perf_counter() - t0) * 1000)
-        return result
+        log.info("ИИ-исправление (%s, %d симв.) за %.0f мс", provider.kind, len(text),
+                 (time.perf_counter() - t0) * 1000)
+        return result, provider
+
+    def correct(self, text: str, terms: Optional[list[str]] = None) -> str:
+        """Исправить всю диктовку: один запрос (очень длинную — крупными частями параллельно)."""
+        text = text.strip()
+        if words(text) < int(self.settings.get("llm.correct_min_words", 4) or 4):
+            return text
+        parts = split_parts(text, PART_CHARS)
+        if len(parts) == 1:
+            return self._correct_part(text, terms)[0]
+        futures = [self._pool.submit(self._correct_part, part, terms) for part in parts]
+        out = []
+        for part, future in zip(parts, futures):
+            try:
+                out.append(future.result()[0])
+            except Exception:  # noqa: BLE001
+                out.append(part)
+        return " ".join(p.strip() for p in out if p.strip())
+
+    def correct_text(self, text: str) -> str:
+        """Совместимость (CLI «test»): исправить один фрагмент."""
+        return self.correct(text)
 
     def warmup(self) -> None:
         """Первый запрос после запуска локальной модели: заполняет кэш промпта."""
@@ -182,36 +217,34 @@ class Corrector:
         except Exception as exc:  # noqa: BLE001
             log.info("Прогрев ИИ не удался: %s", exc)
 
-    # ------------------------------------------------------------ конвейер по кускам
-    def submit(self, sid: int, index: int, text: str) -> None:
-        """Исправлять кусок сразу после того, как распознаватель его зафиксировал."""
-        with self._lock:
-            self._futures[(sid, index)] = (text, self._pool.submit(self.correct_text, text))
 
-    def collect(self, sid: int, chunks: list[str], extra_s: float = 0.6) -> list[str]:
-        """Исправленные куски всей диктовки; что не успело к сроку — остаётся как есть."""
-        deadline = time.monotonic() + self._budget_ms() / 1000 + extra_s
-        futures = []
-        with self._lock:
-            for index, text in enumerate(chunks):
-                entry = self._futures.get((sid, index))
-                if entry is None or entry[0] != text:
-                    entry = (text, self._pool.submit(self.correct_text, text))
-                futures.append(entry)
-            for key in [k for k in self._futures if k[0] == sid]:
-                del self._futures[key]
-        result = []
-        for text, future in futures:
-            try:
-                result.append(future.result(timeout=max(0.0, deadline - time.monotonic())))
-            except Exception:  # noqa: BLE001 — не успели: исходный текст
-                result.append(text)
-        return result
+_SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+")
 
-    def forget(self, sid: int) -> None:
-        with self._lock:
-            for key in [k for k in self._futures if k[0] == sid]:
-                del self._futures[key]
+
+def split_parts(text: str, limit: int) -> list[str]:
+    """Разбить длинный текст на части до limit символов по границам предложений."""
+    text = text.strip()
+    if len(text) <= limit:
+        return [text]
+    parts, cur = [], ""
+    for sent in filter(None, _SENT_SPLIT.split(text)):
+        if cur and len(cur) + 1 + len(sent) > limit:
+            parts.append(cur)
+            cur = sent
+        else:
+            cur = f"{cur} {sent}" if cur else sent
+    if cur:
+        parts.append(cur)
+    # Предложение длиннее лимита (диктовка без точек) — режем по словам.
+    out = []
+    for part in parts:
+        while len(part) > limit * 1.5:
+            cut = part.rfind(" ", 0, limit)
+            cut = cut if cut > 0 else limit
+            out.append(part[:cut])
+            part = part[cut:].strip()
+        out.append(part)
+    return out
 
 
 # ---------------------------------------------------------------- Ollama

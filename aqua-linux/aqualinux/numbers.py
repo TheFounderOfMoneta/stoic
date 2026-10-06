@@ -65,6 +65,18 @@ def _parse(words: list[str]) -> tuple[int, int]:
     return total + group, used
 
 
+# Единицы измерения и времени: с ними числа пишут цифрами («через 10 минут», «5 %»).
+UNIT_STEMS = ("минут", "секунд", "час", "дн", "дней", "недел", "месяц", "процент", "рубл", "доллар", "евро",
+              "километр", "метр", "сантиметр", "миллиметр", "килограмм", "грамм", "тонн", "литр", "градус",
+              "гигабайт", "мегабайт", "килобайт", "терабайт", "байт", "бит", "пиксел", "кадр", "ядер", "ядра",
+              "штук", "мб", "гб", "км", "кг", "мин", "сек", "%")
+
+
+def _is_unit(word: str) -> bool:
+    w = word.lower().replace("ё", "е")
+    return any(w.startswith(stem) for stem in UNIT_STEMS)
+
+
 def _tokens(text: str) -> list[str]:
     return re.findall(r"\s+|[А-Яа-яЁёA-Za-z]+|\d+|.", text, re.UNICODE)
 
@@ -100,7 +112,16 @@ def words_to_digits(text: str) -> str:
             after_marker = prev_word in MARKERS
             # Одиночные «тысяча»/«миллион» без числа перед ними («тысяча извинений») не трогаем.
             standalone_scale = used == 1 and words[0].lower() in SCALES
-            if used and not standalone_scale and (after_marker or used >= 2):
+            # «десять минут», «пять процентов» — с единицей цифрами (но «одну минуту» — словом).
+            k_next = 0
+            n_seen = 0
+            while k_next < len(seq) and n_seen < used:
+                if not seq[k_next].isspace():
+                    n_seen += 1
+                k_next += 1
+            nxt = toks[i + k_next + 1] if i + k_next + 1 < len(toks) and toks[i + k_next].isspace() else ""
+            with_unit = used == 1 and value >= 2 and bool(nxt) and _is_unit(nxt)
+            if used and not standalone_scale and (after_marker or used >= 2 or with_unit):
                 # Сколько исходных токенов (с пробелами) заняли used слов.
                 k, n = 0, 0
                 while n < used:

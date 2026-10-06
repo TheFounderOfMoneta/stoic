@@ -171,6 +171,9 @@ class X11KeyListener:
             thread.start()
             self._threads.append(thread)
 
+    def alive(self) -> bool:
+        return bool(self._threads) and all(t.is_alive() for t in self._threads)
+
     def stop(self) -> None:
         self._stop.set()
         try:

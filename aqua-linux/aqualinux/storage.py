@@ -1,7 +1,9 @@
 """История диктовок (SQLite), статистика, словарь и сниппеты (JSON)."""
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -13,7 +15,9 @@ from typing import Optional
 
 import numpy as np
 
-from .config import AUDIO_DIR, DATA_DIR, HISTORY_DB
+from .config import AUDIO_DIR, DATA_DIR, HISTORY_DB, read_json_safely, write_json_safely
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS transcripts (
@@ -33,15 +37,65 @@ CREATE INDEX IF NOT EXISTS transcripts_ts ON transcripts(ts);
 """
 
 
+def _db_safe(default=None):
+    """Ошибка базы истории не должна ломать диктовку: повреждённую базу откладываем
+    в сторону и начинаем новую, остальные ошибки — в журнал."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            for attempt in range(2):
+                try:
+                    return fn(self, *args, **kwargs)
+                except sqlite3.DatabaseError as exc:
+                    log.warning("История: %s", exc)
+                    if attempt == 0 and _corrupted(exc):
+                        self._recreate()
+                        continue
+                    return default() if callable(default) else default
+            return default() if callable(default) else default
+        return wrapper
+    return deco
+
+
+def _corrupted(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "malformed" in text or "not a database" in text or "no such table" in text or "corrupt" in text
+
+
 class History:
     def __init__(self, path: Path = HISTORY_DB):
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self._lock = threading.Lock()
-        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        try:
+            self._open()
+        except sqlite3.DatabaseError as exc:
+            log.warning("История повреждена (%s) — начинаю новую", exc)
+            self._recreate()
+
+    def _open(self) -> None:
+        self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        self.db.execute("SELECT count(*) FROM transcripts").fetchone()
 
+    def _recreate(self) -> None:
+        try:
+            self.db.close()
+        except Exception:  # noqa: BLE001
+            pass
+        stamp = int(time.time())
+        for suffix in ("", "-wal", "-shm"):
+            src = Path(str(self.path) + suffix)
+            if src.exists():
+                try:
+                    os.replace(src, Path(f"{self.path}.broken-{stamp}{suffix}"))
+                except OSError:
+                    pass
+        self._open()
+
+    @_db_safe(0)
     def add(self, text: str, raw: str, app: str, title: str, mode: str,
             duration: float, words: int, latency: float, audio: Optional[str] = None) -> int:
         with self._lock:
@@ -52,11 +106,13 @@ class History:
             self.db.commit()
             return int(cur.lastrowid)
 
+    @_db_safe(None)
     def update_text(self, row_id: int, text: str, words: int) -> None:
         with self._lock:
             self.db.execute("UPDATE transcripts SET text=?, words=? WHERE id=?", (text, words, row_id))
             self.db.commit()
 
+    @_db_safe(None)
     def delete(self, row_id: int) -> None:
         with self._lock:
             row = self.db.execute("SELECT audio FROM transcripts WHERE id=?", (row_id,)).fetchone()
@@ -68,6 +124,7 @@ class History:
             self.db.execute("DELETE FROM transcripts WHERE id=?", (row_id,))
             self.db.commit()
 
+    @_db_safe(None)
     def clear(self) -> None:
         with self._lock:
             for row in self.db.execute("SELECT audio FROM transcripts WHERE audio IS NOT NULL"):
@@ -78,6 +135,7 @@ class History:
             self.db.execute("DELETE FROM transcripts")
             self.db.commit()
 
+    @_db_safe(list)
     def recent(self, limit: int = 200, query: str = "") -> list[sqlite3.Row]:
         with self._lock:
             if query:
@@ -87,15 +145,19 @@ class History:
                     " ORDER BY ts DESC LIMIT ?", (like, like, like, limit)).fetchall()
             return self.db.execute("SELECT * FROM transcripts ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
 
+    @_db_safe(None)
     def last(self) -> Optional[sqlite3.Row]:
         with self._lock:
             return self.db.execute(
                 "SELECT * FROM transcripts WHERE mode != 'command-input' ORDER BY ts DESC LIMIT 1").fetchone()
 
+    @_db_safe(None)
     def get(self, row_id: int) -> Optional[sqlite3.Row]:
         with self._lock:
             return self.db.execute("SELECT * FROM transcripts WHERE id=?", (row_id,)).fetchone()
 
+    @_db_safe(lambda: {"count": 0, "words": 0, "seconds": 0.0, "wpm": 0.0, "latency": 0.0, "week_words": 0,
+                       "streak": 0, "saved_minutes": 0.0, "top_apps": [], "daily": []})
     def stats(self, typing_wpm: int = 40) -> dict:
         with self._lock:
             row = self.db.execute(
@@ -122,6 +184,7 @@ class History:
             "daily": [(r["d"], int(r["w"])) for r in daily],
         }
 
+    @_db_safe(None)
     def purge_audio(self, keep_days: int) -> None:
         cutoff = time.time() - keep_days * 86400
         with self._lock:
@@ -176,16 +239,16 @@ class JsonStore:
         self.data = self.load()
 
     def load(self):
-        try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        data = read_json_safely(self.path)
+        if not isinstance(data, dict):
             return json.loads(json.dumps(self.default))
+        return data
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        try:
+            write_json_safely(self.path, self.data)
+        except OSError:
+            pass
 
 
 DICTIONARY_VERSION = 2

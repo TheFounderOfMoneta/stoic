@@ -105,6 +105,10 @@ class ASREngine:
         self._q.put(("unload",))
         self._q.put(("load",))
 
+    def alive(self) -> bool:
+        """Поток распознавания жив (или ещё не запускался)."""
+        return not self._thread.is_alive() and self._thread.ident is None or self._thread.is_alive()
+
     def retry_gpu(self) -> None:
         """Ещё раз попробовать видеокарту (например, после выгрузки моделей Ollama)."""
         self._q.put(("retry_gpu",))
@@ -266,8 +270,13 @@ class ASREngine:
             for block in iter(lambda: fh.read(8 << 20), b""):
                 digest.update(block)
         if digest.hexdigest() != _MODEL_HASHES[MODEL_NAME]:
-            raise RuntimeError(f"Контрольная сумма {ckpt.name} не совпала — файл повреждён. "
-                               f"Удалите его, и модель скачается заново.")
+            # Файл повреждён (оборванная загрузка, сбой диска): убираем его — модель скачается заново.
+            # Чужой файл по ссылке не трогаем, удаляем только ссылку.
+            if ckpt.is_symlink():
+                ckpt.unlink()
+            else:
+                ckpt.rename(ckpt.with_name(ckpt.name + ".broken"))
+            raise _Redownload(f"{ckpt.name} повреждён — скачиваю заново")
         known[key] = digest.hexdigest()
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(json.dumps(known))
@@ -351,9 +360,28 @@ class ASREngine:
             else:
                 self.on_status("ready", f"{self.device_label} · {precision.upper()} · загрузка {took:.1f} с")
             log.info("Модель загружена: %s %s за %.1f с", device, precision, took)
+        except _Redownload as exc:
+            log.warning("%s", exc)
+            self.model = None
+            if not getattr(self, "_redownloaded", False):
+                self._redownloaded = True
+                self._load()
+                return
+            self.state = "error"
+            self.on_status("error", f"Ошибка загрузки модели: {exc}")
         except Exception as exc:  # noqa: BLE001
             log.exception("Не удалось загрузить модель")
             self.model = None
+            self.graph = None
+            if getattr(self, "device", "cpu") == "cuda" or (self.torch is not None and not self.force_cpu_reason
+                                                            and self.settings.get("asr.device") != "cpu"
+                                                            and self.torch.cuda.is_available()):
+                # Видеокарта подвела (драйвер, CUDA) — сами переходим на процессор.
+                self.force_cpu_reason = f"Видеокарта недоступна ({str(exc)[:80]}) — распознаю на процессоре."
+                self._free_cuda()
+                self.device = "cpu"
+                self._load()
+                return
             self.state = "error"
             self.on_status("error", f"Ошибка загрузки модели: {exc}")
 
@@ -587,6 +615,10 @@ class ASREngine:
         }
         self._session = None
         self.on_final(sess.sid, final_text, info)
+
+
+class _Redownload(RuntimeError):
+    pass
 
 
 def _is_oom(exc: Exception) -> bool:

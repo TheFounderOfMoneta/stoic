@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 
 APP_ID = "aqua-linux"
@@ -101,6 +103,7 @@ DEFAULTS: dict = {
         "fuzzy_dictionary": True,
         "fuzzy_threshold": 0.84,
         "casual_messaging": False,     # строчные и без точки в мессенджерах
+        "builtin_terms": True,         # встроенная база ~4 тыс. терминов: «гитхаб» → GitHub, «эс кью эль» → SQL
         "numbers": True,               # «номер один» → «№ 1», «двадцать пять» → «25»
         "number_style": "sign",        # sign («№ 5») | word («номер 5»)
     },
@@ -169,6 +172,37 @@ def deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+def read_json_safely(path: Path):
+    """Прочитать JSON; повреждённый файл не ломает приложение: откладываем его в сторону
+    (*.broken) и берём последнюю исправную копию (*.bak). None — ничего нет."""
+    for candidate in (path, path.with_name(path.name + ".bak")):
+        try:
+            return json.loads(candidate.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            try:
+                broken = candidate.with_name(candidate.name + f".broken-{int(time.time())}")
+                os.replace(candidate, broken)
+                logging.getLogger(__name__).warning("Файл %s повреждён — сохранён как %s", candidate, broken)
+            except OSError:
+                pass
+    return None
+
+
+def write_json_safely(path: Path, data) -> None:
+    """Атомарная запись + резервная копия предыдущей исправной версии."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if path.exists():
+        try:
+            os.replace(path, path.with_name(path.name + ".bak"))
+        except OSError:
+            pass
+    os.replace(tmp, path)
+
+
 class Settings:
     """Потокобезопасный словарь настроек с сохранением в JSON."""
 
@@ -179,18 +213,17 @@ class Settings:
         self.data = self._load()
 
     def _load(self) -> dict:
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        raw = read_json_safely(self.path)
+        if not isinstance(raw, dict):
             raw = {}
         return deep_merge(DEFAULTS, raw)
 
     def save(self) -> None:
         with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(tmp, self.path)
+            try:
+                write_json_safely(self.path, self.data)
+            except OSError:
+                pass   # диск заполнен/только чтение — настройки остаются в памяти, приложение работает
 
     def get(self, dotted: str, default=None):
         with self._lock:
