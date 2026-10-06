@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 
+from ..util import jload
 from .features import ALL_TYPES, human
 from .model import InterestModel
 
@@ -91,6 +92,9 @@ def build_brief(storage, settings=None, now: float | None = None, kind: str = "c
         "сохранённые запросы": [q["text"] for q in storage.saved_queries()],
         "уверенность модели": round(model.confidence, 2),
     }
+    weekly = jload(storage.meta_get("weekly_suggestions", ""), {})
+    if weekly.get("explore_ideas"):
+        brief["идеи для разведки (еженедельный разбор)"] = weekly["explore_ideas"][:5]
     if kind == "search":
         brief["запрос"] = query
     return brief

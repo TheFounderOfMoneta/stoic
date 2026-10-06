@@ -184,6 +184,18 @@ CREATE TABLE IF NOT EXISTS glossary (
     created_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS extracted (
+    url_key TEXT PRIMARY KEY,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    published REAL,
+    lang TEXT NOT NULL DEFAULT '',
+    words INTEGER NOT NULL DEFAULT 0,
+    blocks TEXT NOT NULL DEFAULT '[]',
+    ts REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS weights (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -566,7 +578,7 @@ class Storage:
         self.execute(f"UPDATE runs SET {sets} WHERE id=?", (now(), status, *allowed.values(), run_id))
 
     def last_run(self, kind: str = "collect", ok_only: bool = True) -> dict | None:
-        sql = "SELECT * FROM runs WHERE kind=?" + (" AND status IN ('ok', 'partial')" if ok_only else "")
+        sql = "SELECT * FROM runs WHERE kind=?" + (" AND status IN ('ok', 'partial', 'empty')" if ok_only else "")
         row = self.one(sql + " ORDER BY id DESC LIMIT 1", (kind,))
         return dict(row) if row else None
 
@@ -583,6 +595,21 @@ class Storage:
     def was_seen_in_run(self, run_id: int, url: str) -> bool:
         return self.one("SELECT 1 FROM seen_urls WHERE run_id=? AND url_key=?", (run_id, normalize_url(url))) \
             is not None
+
+    # ------------------------------------------------------------------ кэш извлечённых страниц
+    def cache_extracted(self, ex) -> None:
+        self.execute("INSERT OR REPLACE INTO extracted(url_key, url, status, title, published, lang, words, blocks, ts) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (normalize_url(ex.url), ex.url, ex.status, ex.title, ex.published, ex.lang, ex.words,
+                      jdump(ex.blocks), now()))
+
+    def get_extracted(self, url: str) -> dict | None:
+        row = self.one("SELECT * FROM extracted WHERE url_key=?", (normalize_url(url),))
+        if not row:
+            return None
+        d = dict(row)
+        d["blocks"] = jload(d["blocks"], [])
+        return d
 
     # ------------------------------------------------------------------ запросы, словарь, веса
     def saved_queries(self) -> list[dict]:
@@ -644,6 +671,7 @@ class Storage:
                 self.db.execute(f"UPDATE articles SET purged=1, summary_ru='[]', translate_status='none' "
                                 f"WHERE id IN ({marks})", chunk)
             self.db.execute("DELETE FROM seen_urls WHERE ts < ?", (cutoff,))
+            self.db.execute("DELETE FROM extracted WHERE ts < ?", (now() - 7 * 86400,))
             self.db.commit()
         return len(ids)
 

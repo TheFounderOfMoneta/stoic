@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Поддельный `claude` для сценарных тестов (лимиты владельца не тратятся).
+
+Режим сбора: по-настоящему поднимает MCP-сервер «svodka» из --mcp-config и проходит сценарий
+get_brief → filter_new → read_article → save_articles → finish_run, печатая события stream-json.
+Режим перевода (--system-prompt-file …translate.md): читает блоки из stdin и «переводит» их.
+Режим structured (--json-schema): возвращает FAKE_STRUCTURED.
+
+FAKE_CLAUDE_MODE: ok | auth | limit | garbage | partial | slow
+FAKE_URLS: JSON-список ссылок, которые «нашёл» поиск.
+"""
+import json
+import os
+import sys
+import time
+
+MODE = os.environ.get("FAKE_CLAUDE_MODE", "ok")
+args = sys.argv[1:]
+
+
+def emit(obj):
+    print(json.dumps(obj, ensure_ascii=False), flush=True)
+
+
+def result(text="готово", is_error=False, structured=None, cost=0.01):
+    ev = {"type": "result", "subtype": "error_during_execution" if is_error else "success", "is_error": is_error,
+          "result": text, "total_cost_usd": cost, "num_turns": 3}
+    if structured is not None:
+        ev["structured_output"] = structured
+    emit(ev)
+
+
+def tool_use(name, inp):
+    emit({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}})
+
+
+def opt(name, default=None):
+    if name in args:
+        i = args.index(name)
+        return args[i + 1] if i + 1 < len(args) else default
+    return default
+
+
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": MODE != "auth", "authMethod": "claude.ai"}))
+    sys.exit(0)
+
+emit({"type": "system", "subtype": "init", "model": opt("--model", "sonnet")})
+if MODE == "auth":
+    result("Invalid API key · Please run /login", is_error=True)
+    sys.exit(1)
+if MODE == "limit":
+    result("Claude AI usage limit reached|resets 7pm", is_error=True)
+    sys.exit(1)
+if MODE == "slow":
+    time.sleep(30)
+
+system_file = opt("--system-prompt-file", "") or ""
+if system_file.endswith("translate.md"):
+    data = json.loads(sys.stdin.read() or "{}")
+    blocks = data.get("блоки") or []
+    for k, b in enumerate(blocks):
+        if MODE == "partial" and k % 3 == 2:
+            continue
+        line = "это не JSON, а болтовня модели" if MODE == "garbage" else \
+            json.dumps({"id": b["id"], "ru": "Перевод: " + b["text"]}, ensure_ascii=False)
+        for piece in (line[: len(line) // 2], line[len(line) // 2:] + "\n"):
+            emit({"type": "stream_event", "event": {"type": "content_block_delta",
+                                                    "delta": {"type": "text_delta", "text": piece}}})
+    result("")
+    sys.exit(0)
+
+if opt("--json-schema"):
+    result("", structured=json.loads(os.environ.get("FAKE_STRUCTURED", "{}")))
+    sys.exit(0)
+
+# ---------------------------------------------------------------- сбор через настоящий MCP
+import anyio  # noqa: E402
+from mcp import ClientSession  # noqa: E402
+from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
+
+
+async def collect():
+    cfg = json.load(open(opt("--mcp-config")))["mcpServers"]["svodka"]
+    params = StdioServerParameters(command=cfg["command"], args=cfg["args"], env={**os.environ, **cfg["env"]})
+    urls = json.loads(os.environ.get("FAKE_URLS", "[]"))
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            async def call(name, arguments):
+                tool_use("mcp__svodka__" + name, arguments)
+                res = await session.call_tool(name, arguments)
+                return json.loads(res.content[0].text)
+
+            brief = await call("get_brief", {})
+            tool_use("WebSearch", {"query": "ИИ новости " + brief["темы"][0]["название"]})
+            new = (await call("filter_new", {"urls": urls}))["новые"]
+            items = []
+            for k, url in enumerate(new):
+                info = await call("read_article", {"url": url})
+                items.append({
+                    "url": url, "title_ru": f"Статья {k}: {info.get('заголовок') or 'без названия'}",
+                    "title_orig": info.get("заголовок", ""), "source": "Тестовый сайт",
+                    "topic": brief["темы"][k % len(brief["темы"])]["название"], "subtopic": "тестовая подтема",
+                    "entities": ["OpenAI", "Госдума"][k % 2:k % 2 + 1], "kind": "analysis",
+                    "bucket": "core", "importance": 0.6, "fit": 0.7,
+                    "summary_ru": ["Первый факт статьи.", "Второй факт статьи."], "why_ru": "Потому что тест.",
+                    "story_key": f"story-{k}"})
+            items.append({"url": "https://invented.invalid/fake", "title_ru": "Выдуманная", "topic": "ИИ: развитие",
+                          "summary_ru": ["выдумка"]})
+            saved = await call("save_articles", {"items": items})
+            await call("finish_run", {"notes": f"сохранено {saved['сохранено']}"})
+            return saved
+
+
+saved = anyio.run(collect)
+result(f"Сохранено: {saved['сохранено']}")
