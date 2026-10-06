@@ -33,6 +33,7 @@ class Welcome(QFrame):
     """Полноэкранная (внутри окна) карточка-мастер. Показывается один раз; повтор — «Как пользоваться»."""
 
     finished = Signal()
+    ai_result = Signal(bool, str)
 
     def __init__(self, window, host: QWidget):
         super().__init__(host)
@@ -82,9 +83,10 @@ class Welcome(QFrame):
         nav.addStretch(1)
         outer.addLayout(nav)
 
-        for build in (self._hello, self._mic, self._try, self._tricks):
+        for build in (self._hello, self._mic, self._try, self._ai, self._tricks):
             self.stack.addWidget(build())
         self.app.mic_level.connect(self._on_level)
+        self.ai_result.connect(self._ai_done)
         self._heard = 0
         self.setGeometry(host.rect())
         self.show()
@@ -163,6 +165,61 @@ class Welcome(QFrame):
         self.try_status.setWordWrap(True)
         lay.addWidget(self.try_status)
         return w
+
+    def _ai(self) -> QWidget:
+        """Необязательный шаг: ключ DeepSeek — ИИ исправляет ошибки и подставляет термины."""
+        from PySide6.QtWidgets import QLineEdit
+        w, lay = self._page()
+        self._title(lay, "Улучшение текста ИИ",
+                    "Необязательно. С ключом DeepSeek API текст исправляется по смыслу: термины (GitHub, Docker), "
+                    "запятые, оговорки. Стоит копейки, видеокарта не нужна. Ключ: platform.deepseek.com → API keys.")
+        self.ds_key = QLineEdit(self.app.settings.get("llm.deepseek_key") or "")
+        self.ds_key.setEchoMode(QLineEdit.Password)
+        self.ds_key.setPlaceholderText("sk-…   (можно пропустить и вставить позже в Настройках)")
+        lay.addWidget(self.ds_key)
+        row = QHBoxLayout()
+        check = QPushButton("Проверить и включить")
+        check.setCursor(Qt.PointingHandCursor)
+        check.clicked.connect(self._ai_check)
+        row.addWidget(check)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.ai_status = QLabel("")
+        self.ai_status.setObjectName("WelcomeText")
+        self.ai_status.setWordWrap(True)
+        self.ai_status.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.ai_status)
+        return w
+
+    def _ai_check(self) -> None:
+        import threading
+        from .. import llm
+        key = self.ds_key.text().strip()
+        if not key:
+            self.ai_status.setText("Без ключа всё работает: GigaAM сам ставит пунктуацию. ИИ можно включить позже.")
+            return
+        settings = self.app.settings
+        settings.set("llm.deepseek_key", key)
+        settings.set("llm.cloud", True)
+        self.ai_status.setText("Проверяю…")
+
+        def work():
+            try:
+                provider = self.app.router.cloud()
+                llm.request(provider, [{"role": "user", "content": "Ответь одним словом: готово"}],
+                            max_tokens=10, timeout_s=15)
+                ok, text = True, "✓  DeepSeek работает — улучшение текста включено."
+            except Exception as exc:  # noqa: BLE001
+                ok, text = False, f"Не получилось: {llm.explain(exc)}. Ключ сохранён — проверьте его позже в Настройках."
+            self.ai_result.emit(ok, text)      # сигнал доставит результат в поток интерфейса
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _ai_done(self, ok: bool, text: str) -> None:
+        if ok:
+            self.app.settings.set("llm.correct", True)
+            self.app.settings.set("llm.enabled", True)
+        self.ai_status.setText(text)
 
     def _tricks(self) -> QWidget:
         w, lay = self._page()

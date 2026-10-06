@@ -41,6 +41,13 @@ def build_menu(app, parent=None) -> QMenu:
     ai.setChecked(bool(app.settings.get("llm.correct", False)))
     ai.toggled.connect(app.set_ai)
     menu.addAction(ai)
+    polish = QAction("Улучшать структуру и стиль", menu)
+    polish.setCheckable(True)
+    polish.setChecked(app.settings.get("llm.style", "fix") == "polish")
+    polish.setEnabled(bool(app.settings.get("llm.correct", False)))
+    polish.setToolTip("ИИ не только исправляет ошибки, но и переписывает текст: абзацы, списки, без повторов")
+    polish.toggled.connect(app.set_polish)
+    menu.addAction(polish)
     menu.addSeparator()
 
     menu.addAction("Открыть Aqua", lambda: app.show_window("home"))

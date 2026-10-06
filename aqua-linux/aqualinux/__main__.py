@@ -12,7 +12,7 @@ import threading
 import time
 from collections import deque
 
-from .config import APP_ID, APP_NAME, LOG_FILE, PROJECT_ROOT, STATE_DIR, Settings, ensure_dirs
+from .config import APP_ID, APP_NAME, APP_VERSION, LOG_FILE, PROJECT_ROOT, STATE_DIR, Settings, ensure_dirs
 
 COMMANDS = ("toggle", "start", "stop", "cancel", "paste-last", "show", "settings", "history", "quit")
 RESTART_CODE = 75      # приложение само просит перезапуск
@@ -109,6 +109,7 @@ def main(argv=None) -> int:
     parser.add_argument("--no-supervisor", action="store_true", help="без автоматического перезапуска")
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} {APP_VERSION}")
     raw_args = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw_args)
 
@@ -172,10 +173,10 @@ def main(argv=None) -> int:
     # Таймер, чтобы Python успевал обрабатывать сигналы внутри цикла Qt.
     from PySide6.QtCore import QTimer
     tick = QTimer()
-    tick.start(300)
+    tick.start(1000)
     tick.timeout.connect(lambda: None)
     qapp.aboutToQuit.connect(app.shutdown)
-    log.info("%s запущен (%s)", APP_NAME, PROJECT_ROOT)
+    log.info("%s %s запущен (%s)", APP_NAME, APP_VERSION, PROJECT_ROOT)
     return qapp.exec()
 
 

@@ -156,6 +156,18 @@ class _ConnPool:
 _pool = _ConnPool()
 
 
+def reset_connections() -> None:
+    """После сна ноутбука старые соединения мертвы, а таймеры простоя этого не заметили."""
+    with _pool._lock:
+        for conns in _pool._idle.values():
+            for conn, _since in conns:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        _pool._idle.clear()
+
+
 def _uses_proxy(url: str) -> bool:
     host = urllib.parse.urlsplit(url).hostname or ""
     proxies = urllib.request.getproxies()
@@ -415,8 +427,10 @@ class Router:
 
     # ------------------------------------------------------------ вызов
     def call(self, messages: list[dict], *, max_tokens: int, deadline: float, greedy: bool = True,
-             local_time_limit_ms: Optional[int] = None) -> tuple[str, Provider]:
-        """Ответ первой сработавшей модели. deadline — time.monotonic(), к которому нужен ответ."""
+             local_time_limit_ms: Optional[int] = None,
+             local_messages: Optional[list[dict]] = None) -> tuple[str, Provider]:
+        """Ответ первой сработавшей модели. deadline — time.monotonic(), к которому нужен ответ.
+        local_messages — упрощённый запрос для маленькой локальной модели (если отличается)."""
         errors = []
         chain = self.chain()
         if not chain and self.cloud() is not None:
@@ -427,7 +441,8 @@ class Router:
                 break
             try:
                 keep_alive = -1 if self.cloud() is None else "10m"
-                text = request(provider, messages, max_tokens=max_tokens, timeout_s=remaining, greedy=greedy,
+                msgs = messages if provider.cloud or local_messages is None else local_messages
+                text = request(provider, msgs, max_tokens=max_tokens, timeout_s=remaining, greedy=greedy,
                                time_limit_ms=local_time_limit_ms if provider.kind == "builtin" else None,
                                keep_alive=keep_alive)
                 self.last_used = provider.label or provider.kind

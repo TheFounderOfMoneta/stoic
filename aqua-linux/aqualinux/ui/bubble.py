@@ -256,6 +256,14 @@ class Bubble(QWidget):
         return self.settings.get("bubble.show", True) or self.state != "idle"
 
     # -------------------------------------------------------------- анимация
+    def update_frame_rate(self) -> None:
+        """Частота кадров по мощности и питанию: 144 Гц от сети, 60 от батареи, 30 в экономии."""
+        try:
+            from .. import perf
+            self.timer.setInterval(perf.bubble_interval_ms(self.settings))
+        except Exception:  # noqa: BLE001
+            pass
+
     def _kick(self) -> None:
         if self._visible_wanted() and not self.isVisible():
             self.reposition()

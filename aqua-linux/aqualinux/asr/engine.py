@@ -95,6 +95,7 @@ class ASREngine:
         self.last_used = time.monotonic()
         self.device_label = ""
         self.force_cpu_reason = ""     # почему распознавание ушло на процессор (видеопамять занята)
+        self.busy_since: Optional[float] = None   # с какого момента поток занят одной операцией
 
     # ------------------------------------------------------------------ API
     def start(self) -> None:
@@ -108,6 +109,10 @@ class ASREngine:
     def alive(self) -> bool:
         """Поток распознавания жив (или ещё не запускался)."""
         return not self._thread.is_alive() and self._thread.ident is None or self._thread.is_alive()
+
+    def health_check(self, callback) -> None:
+        """Короткая проверка (после сна): callback(True/False) из потока распознавания."""
+        self._q.put(("health", callback))
 
     def retry_gpu(self) -> None:
         """Ещё раз попробовать видеокарту (например, после выгрузки моделей Ollama)."""
@@ -138,11 +143,15 @@ class ASREngine:
     # ---------------------------------------------------------------- поток
     def _run(self) -> None:
         while True:
+            # Идёт запись — проверяем очередь часто (живой текст, фрагменты); в простое — спим
+            # до команды (раз в 5 с — для выгрузки модели по таймеру): меньше пробуждений процессора.
+            active = self._session is not None and not self._session.stopped
             try:
-                cmd = self._q.get(timeout=0.05)
+                cmd = self._q.get(timeout=0.05 if active else 5.0)
             except queue.Empty:
                 cmd = None
             try:
+                self.busy_since = time.monotonic()
                 if cmd is not None:
                     if cmd[0] == "quit":
                         return
@@ -157,6 +166,8 @@ class ASREngine:
                 if sess is not None and cmd is not None and cmd[0] == "finish":
                     self._session = None
                     self.on_final(sess.sid, "", {"error": str(exc)})
+            finally:
+                self.busy_since = None
 
     def _handle(self, cmd: tuple) -> None:
         kind = cmd[0]
@@ -164,6 +175,16 @@ class ASREngine:
             self._load()
         elif kind == "unload":
             self._unload()
+        elif kind == "health":
+            ok = True
+            if self.model is not None:
+                try:
+                    self._transcribe_once((np.random.default_rng(1).standard_normal(SR // 2) * 1e-3)
+                                          .astype(np.float32))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Проверка распознавателя не прошла: %s", exc)
+                    ok = False
+            cmd[1](ok)
         elif kind == "retry_gpu":
             self.force_cpu_reason = ""
             self._unload()
@@ -237,7 +258,8 @@ class ASREngine:
                 log.warning("%s — распознавание на CPU", self.force_cpu_reason)
                 device = "cpu"
         if precision == "auto":
-            precision = "int8" if device == "cuda" else "fp32"
+            from .. import perf
+            precision = "int8" if device == "cuda" else perf.cpu_precision()
         if device == "cpu" and precision == "fp16":
             precision = "fp32"
         return device, precision
@@ -294,7 +316,8 @@ class ASREngine:
             import torch
             import warnings
             self.torch = torch
-            torch.set_num_threads(max(1, int(self.settings.get("asr.cpu_threads") or 6)))
+            from .. import perf
+            torch.set_num_threads(perf.cpu_threads(self.settings))
             torch.backends.cudnn.allow_tf32 = False
             from gigaam.model import GigaAMASR
 
@@ -573,7 +596,8 @@ class ASREngine:
         if not sess.preview:
             return
         now = time.monotonic()
-        interval = max(0.25, (self.settings.get("asr.preview_interval_ms") or 600) / 1000)
+        from .. import perf
+        interval = max(0.25, perf.preview_interval_ms(self.settings) / 1000)
         if now - sess.last_preview_at < interval or sess.total - sess.last_preview_total < SR * 0.25:
             return
         start = sess.commit_pos

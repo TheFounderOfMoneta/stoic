@@ -15,6 +15,7 @@ from pathlib import Path
 
 APP_ID = "aqua-linux"
 APP_NAME = "Aqua Linux"
+APP_VERSION = "1.0.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -100,10 +101,10 @@ DEFAULTS: dict = {
     "text": {
         "remove_fillers": True,
         "voice_commands": True,        # «новая строка», «новый абзац»
-        "fuzzy_dictionary": True,
+        "fuzzy_dictionary": False,     # нечёткий поиск по словарю (термины по смыслу подставляет ИИ)
         "fuzzy_threshold": 0.84,
         "casual_messaging": False,     # строчные и без точки в мессенджерах
-        "builtin_terms": True,         # встроенная база ~4 тыс. терминов: «гитхаб» → GitHub, «эс кью эль» → SQL
+        "builtin_terms": False,        # встроенная база ~4 тыс. терминов (без ИИ); с ИИ термины подставляет он
         "numbers": True,               # «номер один» → «№ 1», «двадцать пять» → «25»
         "number_style": "sign",        # sign («№ 5») | word («номер 5»)
     },
@@ -129,6 +130,7 @@ DEFAULTS: dict = {
         "cloud_timeout_ms": 4000,      # DeepSeek не ответил за это время — запасная модель/исходный текст
         "provider": "builtin",         # запасная/локальная: builtin (Qwen3.5-0.8B, llama.cpp) | ollama | openai
         "correct": False,              # улучшать распознанный текст
+        "style": "fix",                # fix — исправлять ошибки | polish — улучшать структуру и стиль
         "correct_timeout_ms": 2500,    # не успела — вставляем исходный текст
         "correct_min_words": 4,        # короткие фразы не трогаем
         "enabled": False,              # Edit Mode (правка выделенного голосом)
@@ -156,6 +158,7 @@ DEFAULTS: dict = {
         "tips_seen": [],               # страницы, где подсказки уже показаны
     },
     "general": {
+        "performance": "auto",         # auto (подстройка под ПК и питание) | quality | economy
         "autostart": True,
         "privacy_mode": False,         # не сохранять историю
         "typing_wpm_baseline": 40,
@@ -203,6 +206,19 @@ def write_json_safely(path: Path, data) -> None:
     os.replace(tmp, path)
 
 
+SETTINGS_VERSION = 2
+
+
+def migrate_settings(data: dict, version: int) -> None:
+    """Обновление сохранённых настроек при смене поведения по умолчанию."""
+    if version < 2:
+        # Термины теперь подставляет ИИ по смыслу; встроенная подстановка и нечёткий поиск —
+        # по желанию (они иногда заменяли обычные слова и добавляли задержку).
+        text = data.setdefault("text", {})
+        text["builtin_terms"] = False
+        text["fuzzy_dictionary"] = False
+
+
 class Settings:
     """Потокобезопасный словарь настроек с сохранением в JSON."""
 
@@ -216,7 +232,11 @@ class Settings:
         raw = read_json_safely(self.path)
         if not isinstance(raw, dict):
             raw = {}
-        return deep_merge(DEFAULTS, raw)
+        data = deep_merge(DEFAULTS, raw)
+        if raw and int(raw.get("settings_version", 1) or 1) < SETTINGS_VERSION:
+            migrate_settings(data, int(raw.get("settings_version", 1) or 1))
+        data["settings_version"] = SETTINGS_VERSION
+        return data
 
     def save(self) -> None:
         with self._lock:

@@ -27,7 +27,7 @@ from PySide6.QtGui import QClipboard, QGuiApplication
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
 
-from . import llm, pwaudio
+from . import llm, perf, pwaudio
 from .asr.engine import ASREngine
 from .audio import Recorder, SoundPlayer, audio_backend_error, clipped_count, friendly_mic_error
 from .config import APP_ID, Settings
@@ -47,6 +47,7 @@ IPC_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", f"{APP_ID}-
 SAFE_MIME = ("text/", "image/png", "x-special/", "application/x-kde", "chromium/")
 CLIP_WARN_RATIO = 0.01     # больше 1 % сэмплов в потолок — микрофон перегружен
 CLIP_AUTOFIX_RATIO = 0.05  # больше 5 % — снижаем усиление сами (один раз, с кнопкой «Вернуть»)
+CLIP_SKIP_SAMPLES = 5600   # первые 0,35 с записи — щелчок при включении микрофона не считаем
 MIN_SPEECH_REPORT_S = 0.8  # «Речь не распознана» показываем только для записей длиннее
 WATCHDOG_MS = 2000
 
@@ -79,6 +80,7 @@ class Session:
         self.sink = None            # приёмник аудио этой сессии (привязан к sid)
         self.samples = 0
         self.clipped = 0
+        self.clip_blocks = 0
         self.info: dict = {}
         self.raw = ""
         self.ai = False
@@ -108,6 +110,9 @@ class App(QObject):
     sig_cloud_failed = Signal(str, bool)
     sig_cloud_ok = Signal()
     sig_reasr = Signal(int, str)
+    sig_clip = Signal(float, float)
+    sig_power = Signal()
+    sig_heal_engine = Signal(str)
     sig_need_local = Signal()
     sig_notice_done = Signal(str, bool, str)
     # Для окна настроек
@@ -160,7 +165,9 @@ class App(QObject):
         self._last_text = ""
         self._last_insert = None
         self._mic_test = False
+        self._mic_test_since = 0.0
         self._mic_sink = lambda block: None
+        self._clip_history: deque = deque(maxlen=3)
         self._cancel_grabbed = False
         self._outbox: deque = deque()               # очередь вставки (text, send)
         self._insert_busy = False
@@ -189,6 +196,9 @@ class App(QObject):
         self.sig_retranscribed.connect(self._on_retranscribed)
         self.sig_cloud_ok.connect(lambda: self.clear_notice("cloud"))
         self.sig_reasr.connect(self._on_reasr)
+        self.sig_clip.connect(self._on_clip)
+        self.sig_power.connect(self._on_power)
+        self.sig_heal_engine.connect(self._restart_engine)
         self.sig_corrected.connect(self._on_corrected)
         self.sig_llm_state.connect(self._on_llm_state)
         self.sig_cloud_failed.connect(self._on_cloud_failed)
@@ -231,6 +241,7 @@ class App(QObject):
             self.engine_state = ("error", str(exc))
         self._grab_static()
         self.bubble.set_hint(self.hint_text())
+        self.bubble.update_frame_rate()
         self.bubble.set_model_loading(True)
         self.bubble.apply_targets()
         if self.settings.get("bubble.show", True):
@@ -241,12 +252,13 @@ class App(QObject):
         # Локальную модель запускаем после распознавателя (он важнее для видеопамяти);
         # запасной таймер — если распознаватель грузится очень долго.
         QTimer.singleShot(20000, self._maybe_start_llm_once)
-        if self.settings.get("audio.keep_mic_warm"):
+        if self.settings.get("audio.keep_mic_warm") and not perf.economy(self.settings):
             self.recorder.set_warm(True, self.settings.get("audio.input_device"))
         self._start_ipc()
         # Базу терминов грузим заранее, чтобы первая диктовка не ждала.
-        from . import terms as builtin_terms
-        threading.Thread(target=builtin_terms.index, name="terms", daemon=True).start()
+        if self.settings.get("text.builtin_terms", False):
+            from . import terms as builtin_terms
+            threading.Thread(target=builtin_terms.index, name="terms", daemon=True).start()
         self._watchdog_timer = QTimer(self)
         self._watchdog_timer.timeout.connect(self._watchdog)
         self._watchdog_timer.start(WATCHDOG_MS)
@@ -563,9 +575,14 @@ class App(QObject):
             sess.audio.append(block)
             sess.samples += block.size
             sess.last_block = time.monotonic()
-            clipped = clipped_count(block)
-            if clipped:
-                sess.clipped += clipped
+            # Первые 0,35 с не считаем: при включении микрофона (особенно после сна или в режиме
+            # энергосбережения) звуковая карта даёт щелчок — это не перегруз.
+            if sess.samples > CLIP_SKIP_SAMPLES:
+                clipped = clipped_count(block)
+                if clipped:
+                    sess.clipped += clipped
+                    if clipped >= 3:
+                        sess.clip_blocks += 1
         return sink
 
     def _begin_background(self, sid: int) -> None:
@@ -694,17 +711,38 @@ class App(QObject):
         self._grab_cancel(rec is not None or bool(self.jobs))
 
     def _check_clipping(self, sess: Session) -> None:
-        if not self.settings.get("audio.warn_clipping", True) or sess.samples < 16000 * 0.5:
+        usable = sess.samples - CLIP_SKIP_SAMPLES
+        if not self.settings.get("audio.warn_clipping", True) or usable < 16000:
             return
-        ratio = sess.clipped / max(1, sess.samples)
+        ratio = sess.clipped / max(1, usable)
         sess.info["clipped"] = ratio
-        if ratio < CLIP_WARN_RATIO:
+        # Перегруз — это много «упёршихся» сэмплов, разбросанных по записи, а не один щелчок.
+        bad = ratio >= CLIP_WARN_RATIO and sess.clip_blocks >= 6
+        self._clip_history.append(bad)
+        if not bad:
             return
-        log.warning("Микрофон перегружен: %.1f%% сэмплов в потолок", ratio * 100)
-        if ratio >= CLIP_AUTOFIX_RATIO and time.monotonic() - self._clip_autofixed_at > 3600:
-            # Сильный перегруз — снижаем усиление сами, человеку думать не нужно.
+        log.warning("Перегруз микрофона: %.1f%% сэмплов, %d блоков", ratio * 100, sess.clip_blocks)
+        if sum(self._clip_history) < 2:
+            return      # один раз — случайность (громкий звук рядом); ждём повторения
+        device = self.settings.get("audio.input_device")
+
+        def work():
+            src = pwaudio.current_source(device)
+            gain = src.gain_db if src is not None else None
+            self.sig_clip.emit(ratio, -1.0 if gain is None else float(gain))
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(float, float)
+    @guarded
+    def _on_clip(self, ratio: float, gain: float) -> None:
+        device = self.settings.get("audio.input_device")
+        if 0 <= gain <= 24:
+            # Усиление и так умеренное — дело не в настройках, а в громкости рядом с микрофоном.
+            log.info("Перегруз при умеренном усилении (+%.0f дБ) — уведомление не показываю", gain)
+            return
+        if gain > 24 and ratio >= CLIP_AUTOFIX_RATIO and time.monotonic() - self._clip_autofixed_at > 3600:
+            # Сильный повторяющийся перегруз при высоком усилении — снижаем сами.
             self._clip_autofixed_at = time.monotonic()
-            device = self.settings.get("audio.input_device")
 
             def work():
                 before = pwaudio.current_source(device)
@@ -842,6 +880,7 @@ class App(QObject):
         old = self.engine
         try:
             old.shutdown()
+            old._thread.join(3)        # дать старому освободить видеопамять
         except Exception:  # noqa: BLE001
             pass
         self.engine = self._new_engine()
@@ -909,20 +948,31 @@ class App(QObject):
         try:
             now = time.monotonic()
             # Распознаватель: поток умер или запись ждёт слишком долго (завис на видеокарте).
+            self._check_resume()
+            if now - getattr(self, "_power_checked", 0.0) > 30:
+                self._power_checked = now
+                threading.Thread(target=self._refresh_power, name="power", daemon=True).start()
             loading = self.engine.state in ("loading", "downloading")
+            busy = getattr(self.engine, "busy_since", None)
+            waiting = [s for s in self.jobs.values() if not s.raw and s.text is None and s.asr_since is not None]
             if not self.engine.alive():
                 self._restart_engine("поток распознавания остановился")
-            elif not loading:
-                for sess in list(self.jobs.values()):
-                    if sess.raw or sess.text is not None or sess.asr_since is None:
-                        continue
-                    limit = 25 + sess.samples / 16000
-                    if now - sess.asr_since > limit:
+            elif not loading and busy is not None and now - busy > 120:
+                # Одна операция дольше 2 минут — это зависание (видеокарта, драйвер), а не медленный
+                # процессор: даже 18-секундный кусок на слабом CPU распознаётся быстрее.
+                stuck = [s for s in waiting if s.asr_retries >= 2]
+                for sess in stuck:
+                    self._keep_unrecognized(sess)
+                self._restart_engine(f"распознавание не отвечает {now - busy:.0f} с")
+            elif not loading and busy is None and waiting:
+                # Распознаватель свободен, а запись всё ещё ждёт — команда потерялась: отправляем заново.
+                for sess in waiting:
+                    if now - sess.asr_since > 20:
+                        log.warning("Запись #%d потерялась в распознавателе — отправляю заново", sess.sid)
                         if sess.asr_retries >= 2:
                             self._keep_unrecognized(sess)
                         else:
-                            self._restart_engine(f"запись #{sess.sid} ждёт распознавания {now - sess.asr_since:.0f} с")
-                        break
+                            self._resubmit(sess)
             # ИИ не вернул ответ далеко за сроком — вставляем без него.
             for sess in list(self.jobs.values()):
                 if sess.ai_since is not None and sess.text is None:
@@ -939,6 +989,18 @@ class App(QObject):
             # Клавиатура: поток XRecord умер (например, после смены раскладки или сбоя X).
             if self.listener is not None and not self.listener.alive():
                 self._restart_listener()
+            # Микрофон открыт, а он никому не нужен (утечка, сбой) — закрываем: значок гаснет.
+            if self.rec is None and self._tail is None and not self._mic_test and hasattr(self.recorder, "close_if_unused"):
+                if self.recorder.close_if_unused():
+                    log.warning("Микрофон оставался открытым без записи — закрыт")
+            # Проверка микрофона в окне — не дольше минуты и только пока окно на экране.
+            if self._mic_test and (now - self._mic_test_since > 60 or self.window is None
+                                   or not self.window.isVisible()):
+                self.mic_test(False)
+            # «Тёплый» микрофон в экономном режиме не держим.
+            if getattr(self.recorder, "warm", False) and perf.economy(self.settings) and self.rec is None \
+                    and self._tail is None:
+                self.recorder.set_warm(False)
             # Микрофон замолчал посреди записи (отключили USB, PipeWire перезапустился).
             rec = self.rec
             if rec is not None and now - rec.started > 1.5 and now - rec.last_block > 2.0 \
@@ -950,6 +1012,44 @@ class App(QObject):
                 self.bubble.show_message("Микрофон переподключён — продолжайте", "info", 1500)
         except Exception:  # noqa: BLE001
             log.exception("Сбой сторожа")
+
+    def _refresh_power(self) -> None:
+        if perf.refresh_power():
+            log.info("%s", perf.detect().label())
+            self.sig_power.emit()
+
+    def _on_power(self) -> None:
+        self.bubble.update_frame_rate()
+        if perf.economy(self.settings) and getattr(self.recorder, "warm", False) and self.rec is None:
+            self.recorder.set_warm(False)
+
+    def _check_resume(self) -> None:
+        """Ноутбук проснулся (часы ушли вперёд, а монотонное время стояло): чиним то, что
+        обычно ломает сон, — соединения, микрофон, видеокарту."""
+        wall, mono = time.time(), time.monotonic()
+        last = getattr(self, "_clock", None)
+        self._clock = (wall, mono)
+        if last is None:
+            return
+        slept = (wall - last[0]) - (mono - last[1])
+        if slept < 20:
+            return
+        log.info("Компьютер просыпался (сон ~%.0f с) — проверяю устройства", slept)
+        llm.reset_connections()
+        pwaudio.invalidate()
+        perf.detect(force=True)
+        self.bubble.update_frame_rate()
+        if self.rec is not None:
+            if hasattr(self.recorder, "reopen") and not self.recorder.reopen(self.settings.get("audio.input_device")):
+                self.recorder.reopen(None)
+        elif getattr(self.recorder, "warm", False):
+            self.recorder.set_warm(False)
+            if self.settings.get("audio.keep_mic_warm") and not perf.economy(self.settings):
+                self.recorder.set_warm(True, self.settings.get("audio.input_device"))
+        # После сна драйвер NVIDIA иногда теряет контекст CUDA: проверяем распознаватель коротким
+        # тестом, при ошибке он сам перезапустится (и при необходимости уйдёт на процессор).
+        self.engine.health_check(lambda ok: None if ok else self.sig_heal_engine.emit("сбой после сна"))
+        self.clear_notice("clip")
 
     def _restart_listener(self) -> None:
         log.warning("Перезапускаю перехват клавиш")
@@ -1372,6 +1472,13 @@ class App(QObject):
             if self.window is not None and hasattr(self.window, "focus_ai"):
                 self.window.focus_ai()
 
+    def set_polish(self, on: bool) -> None:
+        """Режим «Улучшать структуру и стиль» (трей, настройки)."""
+        self.settings.set("llm.style", "polish" if on else "fix")
+        if self.rec is None:
+            self.bubble.show_message("ИИ: улучшает структуру и стиль" if on else "ИИ: только исправляет ошибки",
+                                     "info", 1600)
+
     def set_microphone(self, value) -> None:
         self.settings.set("audio.input_device", value)
         from .audio import device_label
@@ -1393,6 +1500,7 @@ class App(QObject):
             try:
                 self.recorder.start(self.settings.get("audio.input_device"), self._mic_sink, preroll_blocks=0)
                 self._mic_test = True
+                self._mic_test_since = time.monotonic()
             except Exception as exc:  # noqa: BLE001
                 self.status_changed.emit("mic-error", str(exc))
         elif not on and self._mic_test:

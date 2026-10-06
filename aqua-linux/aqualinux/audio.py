@@ -249,9 +249,12 @@ class Recorder:
         self._resampler: Optional[Resampler] = None
         self._preroll: deque = deque(maxlen=12)   # ~0,4 с перед нажатием при «тёплом» микрофоне
         self._warm = False
+        self.opened_at = 0.0
+        self.last_block_at = 0.0
 
     # --------------------------------------------------------------- поток
     def _callback(self, indata, frames, time_info, status):  # noqa: ARG002
+        self.last_block_at = time.monotonic()
         block = indata[:, 0].astype(np.float32, copy=True)
         resampler = self._resampler
         if resampler is not None:
@@ -290,19 +293,51 @@ class Recorder:
                 log.info("Микрофон открыт на %d Гц с пересчётом в 16 кГц", rate)
             self._native_rate = rate
             self._resampler = Resampler(rate) if rate != SR else None
-            stream.start()
+            try:
+                stream.start()
+            except Exception:
+                # Открылся, но не запустился (типично после сна) — обязательно закрыть,
+                # иначе микрофон останется занятым и значок будет гореть.
+                try:
+                    stream.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                raise
         self._stream = stream
         self._device = device
+        self.opened_at = time.monotonic()
+        self.last_block_at = time.monotonic()
+        log.info("Микрофон открыт (%s, %d Гц)", device or "системный", rate)
 
     def _close(self) -> None:
         stream, self._stream = self._stream, None
         if stream is not None:
             try:
-                stream.stop()
+                stream.abort()          # не ждём буферы: закрываем сразу
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 stream.close()
             except Exception:  # noqa: BLE001
-                log.exception("Ошибка закрытия микрофона")
+                log.debug("Ошибка закрытия микрофона", exc_info=True)
+            log.info("Микрофон закрыт")
         self._preroll.clear()
+
+    @property
+    def is_open(self) -> bool:
+        return self._stream is not None
+
+    @property
+    def warm(self) -> bool:
+        return self._warm
+
+    def close_if_unused(self) -> bool:
+        """Страховка: поток открыт, а он никому не нужен — закрыть (значок микрофона гаснет)."""
+        with self._lock:
+            if self._stream is not None and self._sink is None and not self._warm:
+                self._close()
+                return True
+        return False
 
     # ---------------------------------------------------------------- API
     def set_warm(self, warm: bool, device=None) -> None:

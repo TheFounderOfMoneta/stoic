@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
         self.llm_result.connect(self._on_llm_test)
         self.ds_result.connect(self._on_ds_test)
         self._render_notices()
+        self.settings.on_change(self._external_setting)
         self._on_status(*app.engine_state)
         self._show_ai_state(app.local_llm.state, app.local_llm.message, -1)
 
@@ -301,6 +302,10 @@ class MainWindow(QMainWindow):
         hl.setContentsMargins(4, 0, 0, 0)
         hl.addWidget(howto)
         hl.addStretch(1)
+        from ..config import APP_VERSION
+        ver = QLabel(f"v{APP_VERSION}")
+        ver.setObjectName("SidebarFooter")
+        hl.addWidget(ver)
         lay.addLayout(hl)
         return side
 
@@ -745,6 +750,12 @@ class MainWindow(QMainWindow):
         self.ai_row = basic.add_row("Улучшать текст с помощью ИИ",
                                     "DeepSeek (по ключу) исправляет ошибки распознавания, без интернета — "
                                     "локальная Qwen3.5.", self.ai_switch)
+        self.style_combo = bind_combo(s, "llm.style", [
+            ("fix", "Исправлять ошибки (бережно)"),
+            ("polish", "Улучшать структуру и стиль")])
+        self.style_row = basic.add_row("Как улучшать",
+                                       "«Структура и стиль» — ИИ переписывает текст: убирает повторы и оговорки, "
+                                       "делит на абзацы, оформляет списки. Нужен DeepSeek.", self.style_combo)
         self.ai_status = QLabel("")
         self.ai_status.setObjectName("Muted")
         self.ai_status.setWordWrap(True)
@@ -990,6 +1001,13 @@ class MainWindow(QMainWindow):
         brow.addWidget(data_btn)
         brow.addStretch(1)
         engine.add_widget(bw)
+        from .. import perf
+        engine.add_row("Режим работы", perf.detect().label() + ". «Автоматически» подстраивается под ПК и "
+                       "питание: от батареи и в энергосбережении — меньше нагрузки.",
+                       bind_combo(s, "general.performance", [("auto", "Автоматически"),
+                                                             ("quality", "Максимальное качество"),
+                                                             ("economy", "Экономия энергии")],
+                                  on_change=lambda _: (self.app.bubble.update_frame_rate(), self.app.engine.reload())))
         engine.add_row("Где считать", "Видеокарта NVIDIA в разы быстрее процессора.", bind_combo(s, "asr.device", [
             ("auto", "Автоматически"), ("cuda", "Видеокарта (CUDA)"), ("cpu", "Процессор")]))
         engine.add_row("Точность", "INT8 — быстрый режим вашей сборки GigaAM.", bind_combo(s, "asr.precision", [
@@ -1163,6 +1181,30 @@ class MainWindow(QMainWindow):
         if progress >= 0:
             self.ai_progress.setValue(int(progress * 1000))
         self.ai_box.setVisible(bool(text) or self.ai_progress.isVisible())
+
+    def _external_setting(self, key: str, value) -> None:
+        """Настройку поменяли из трея — показать это и в открытом окне."""
+        if self.app.window is not self:
+            return
+        try:
+            if key == "llm.style" and hasattr(self, "style_combo"):
+                i = self.style_combo.findData(value)
+                if i >= 0 and i != self.style_combo.currentIndex():
+                    self.style_combo.blockSignals(True)
+                    self.style_combo.setCurrentIndex(i)
+                    self.style_combo.blockSignals(False)
+            elif key == "llm.correct" and hasattr(self, "ai_switch") and self.ai_switch.isChecked() != bool(value):
+                self.ai_switch.blockSignals(True)
+                self.ai_switch.setChecked(bool(value))
+                self.ai_switch.blockSignals(False)
+            elif key == "audio.input_device" and hasattr(self, "mic_combo"):
+                i = self.mic_combo.findData(value)
+                if i >= 0 and i != self.mic_combo.currentIndex():
+                    self.mic_combo.blockSignals(True)
+                    self.mic_combo.setCurrentIndex(i)
+                    self.mic_combo.blockSignals(False)
+        except RuntimeError:
+            pass   # окно уже закрыто
 
     # ------------------------------------------------------------- уведомления
     def _render_notices(self) -> None:
