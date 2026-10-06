@@ -6,6 +6,9 @@
   translate ID             — перевести статью
   mcp                      — MCP-сервер для Claude (запускает сам Claude)
   install-timer            — поставить/обновить таймер systemd
+  remove-timer             — убрать таймер systemd
+  install-desktop          — ярлык в меню приложений и значок
+  remove-desktop           — убрать ярлык, значок и автозапуск
   import-takeout ПУТЬ      — стартовые интересы из Google Takeout (YouTube, поиск)
   weekly                   — еженедельный разбор профиля Claude
   status                   — состояние: вход в Claude, последний сбор, таймер
@@ -51,6 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("article_id", type=int)
     sub.add_parser("mcp")
     sub.add_parser("install-timer")
+    sub.add_parser("remove-timer")
+    sub.add_parser("install-desktop")
+    sub.add_parser("remove-desktop")
     imp = sub.add_parser("import-takeout")
     imp.add_argument("path")
     sub.add_parser("weekly")
@@ -60,6 +66,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd in (None, "gui"):
         from .app import main as gui_main
         return gui_main(["--background"] if getattr(args, "background", False) else [])
+    if args.cmd == "install-desktop":
+        from . import desktop
+        for path in desktop.install():
+            print(path)
+        return 0
+    if args.cmd == "remove-desktop":
+        from . import desktop
+        from .app import AUTOSTART_FILE
+        desktop.remove()
+        try:
+            AUTOSTART_FILE.unlink()
+        except OSError:
+            pass
+        return 0
+    if args.cmd == "remove-timer":
+        from . import systemd
+        systemd.remove()
+        return 0
     if args.cmd == "mcp":
         from .mcp_server import main as mcp_main
         mcp_main()

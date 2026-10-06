@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import http.server
 import threading
-from functools import partial
-from pathlib import Path
 
 EN_PARAS = [
     "Governments are quietly rebuilding the machinery that decides how artificial intelligence is deployed. "

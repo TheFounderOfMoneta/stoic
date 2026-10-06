@@ -16,7 +16,7 @@ from typing import Optional
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPainterPath
-from PySide6.QtWidgets import QAbstractItemView, QFrame, QListView, QStyle, QStyledItemDelegate
+from PySide6.QtWidgets import QAbstractItemView, QFrame, QListView, QStyledItemDelegate
 
 from ..rank.signals import expected_ms
 from . import widgets as W

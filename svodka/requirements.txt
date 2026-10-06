@@ -1,0 +1,8 @@
+# Окно
+PySide6-Essentials>=6.6
+# Сбор, извлечение текста, поиск
+httpx>=0.27
+trafilatura>=1.12
+PyStemmer>=2.2
+# MCP-сервер, через который Claude сохраняет статьи
+mcp>=2.0,<3
