@@ -28,6 +28,7 @@ __all__ = [
 _CACHE_DIR = os.path.expanduser("~/.cache/gigaam")
 # Url with model checkpoints
 _URL_DIR = "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM"
+_DOWNLOAD_TIMEOUT = 60  # seconds without data before a retry
 _DOWNLOAD_RETRIES = 3
 _MODEL_HASHES = {
     "emo": "7ce76f9535cb254488985057c0d33006",
@@ -52,36 +53,54 @@ _MODEL_HASHES = {
 def _download_file(
     file_url: str, file_path: str, retries: int = _DOWNLOAD_RETRIES
 ) -> str:
-    """Download a file if not already cached, retrying a few times on failure."""
+    """Download a file if not already cached, retrying a few times on failure.
+
+    Aqua Linux: a stalled connection must not hang forever (timeout), and a broken
+    download continues from where it stopped (``.part`` + HTTP Range) instead of
+    starting the ~0.9 GB file from zero.
+    """
     if os.path.exists(file_path):
         return file_path
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    part_path = file_path + ".part"
     for attempt in range(1, retries + 1):
         try:
-            with (
-                urllib.request.urlopen(file_url) as source,
-                open(file_path, "wb") as output,
-            ):
-                with tqdm(
-                    total=int(source.info().get("Content-Length", 0)),
+            done = os.path.getsize(part_path) if os.path.exists(part_path) else 0
+            request = urllib.request.Request(file_url)
+            if done:
+                request.add_header("Range", f"bytes={done}-")
+            with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT) as source:
+                if done and getattr(source, "status", 200) != 206:
+                    done = 0          # server ignored Range: start over
+                total = int(source.info().get("Content-Length", 0)) + done
+                with open(part_path, "ab" if done else "wb") as output, tqdm(
+                    total=total,
+                    initial=done,
                     ncols=80,
                     unit="iB",
                     unit_scale=True,
                     unit_divisor=1024,
                 ) as loop:
                     while True:
-                        buffer = source.read(8192)
+                        buffer = source.read(1 << 16)
                         if not buffer:
                             break
 
                         output.write(buffer)
                         loop.update(len(buffer))
+            got = os.path.getsize(part_path)
+            if total > done and got < total:
+                # The connection dropped without an error: keep the part, resume next try.
+                raise IOError(f"incomplete download: {got} of {total} bytes")
+            os.replace(part_path, file_path)
             return file_path
         except BaseException as err:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            if attempt == retries or not isinstance(err, Exception):
+            if not isinstance(err, Exception):
+                if os.path.exists(part_path):
+                    os.remove(part_path)
+                raise
+            if attempt == retries:
                 raise
             logging.warning(
                 "Download of %s failed (attempt %d/%d): %s. Retrying...",
@@ -90,7 +109,7 @@ def _download_file(
                 retries,
                 err,
             )
-            time.sleep(2)
+            time.sleep(min(30, 2 * attempt))
 
     raise RuntimeError(f"Download of {file_url} failed after {retries} attempts.")
 

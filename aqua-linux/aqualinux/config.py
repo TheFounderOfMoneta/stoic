@@ -15,7 +15,7 @@ from pathlib import Path
 
 APP_ID = "aqua-linux"
 APP_NAME = "Aqua Linux"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -161,6 +161,7 @@ DEFAULTS: dict = {
         "performance": "auto",         # auto (подстройка под ПК и питание) | quality | economy
         "autostart": True,
         "privacy_mode": False,         # не сохранять историю
+        "history_days": 7,             # хранить историю N дней (0 — всегда); старые записи удаляются сами
         "typing_wpm_baseline": 40,
     },
 }
@@ -208,6 +209,72 @@ def write_json_safely(path: Path, data) -> None:
 
 SETTINGS_VERSION = 2
 
+# Допустимые значения: настройки правят руками, переносят между версиями, файл может
+# повредиться — неверное значение не должно ломать приложение (например, «max_minutes: 0»
+# мгновенно обрывала бы каждую запись).
+RANGES = {
+    "hotkeys.tap_threshold_ms": (60, 1500), "hotkeys.double_tap_window_ms": (100, 1500),
+    "audio.tail_ms": (0, 2000), "audio.sound_volume": (0.0, 1.0), "audio.max_minutes": (1, 180),
+    "audio.keep_audio_days": (1, 3650), "asr.cpu_threads": (0, 64), "asr.preview_interval_ms": (200, 10000),
+    "asr.unload_after_min": (0, 1440), "insert.restore_delay_ms": (80, 5000),
+    "text.fuzzy_threshold": (0.5, 1.0), "llm.cloud_timeout_ms": (800, 60000),
+    "llm.correct_timeout_ms": (500, 60000), "llm.correct_min_words": (0, 100), "llm.timeout_s": (2, 600),
+    "edit_mode.max_chars": (100, 200000), "general.history_days": (0, 3650),
+    "general.typing_wpm_baseline": (5, 300),
+}
+CHOICES = {
+    "audio.while_dictating": ("none", "mute", "pause"), "asr.device": ("auto", "cuda", "cpu"),
+    "asr.precision": ("auto", "int8", "fp16", "fp32"), "asr.streaming": ("never", "hands_free", "always"),
+    "insert.method": ("paste", "type", "clipboard"), "insert.send_key": ("enter", "ctrl+enter", "none"),
+    "text.number_style": ("sign", "word"), "bubble.position": ("bottom", "top"),
+    "bubble.style": ("glass", "classic"), "llm.style": ("fix", "polish"),
+    "llm.provider": ("builtin", "ollama", "openai", "external"), "llm.builtin_backend": ("auto", "cuda", "vulkan", "cpu"),
+    "ui.theme": ("auto", "dark", "light"), "general.performance": ("auto", "quality", "economy"),
+}
+HOTKEY_LISTS = ("activate", "hands_free", "paste_last", "cancel")
+
+
+def sanitize(data: dict, defaults: dict = None, prefix: str = "") -> list[str]:
+    """Привести типы и диапазоны к допустимым. Возвращает исправленные ключи."""
+    defaults = DEFAULTS if defaults is None else defaults
+    fixed: list[str] = []
+    for key, default in defaults.items():
+        if key not in data:
+            continue
+        path = prefix + key
+        value = data[key]
+        ok = True
+        if isinstance(default, dict):
+            if not isinstance(value, dict):
+                ok = False
+            elif default:
+                fixed += sanitize(value, default, path + ".")
+        elif default is None:
+            continue
+        elif isinstance(default, bool):
+            ok = isinstance(value, bool)
+        elif isinstance(default, (int, float)):
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool) and value == value \
+                and abs(value) != float("inf")
+            if ok and path in RANGES:
+                lo, hi = RANGES[path]
+                if not lo <= value <= hi:
+                    data[key] = type(default)(min(max(value, lo), hi))
+                    fixed.append(path)
+        elif isinstance(default, str):
+            ok = isinstance(value, str) and (path not in CHOICES or value in CHOICES[path])
+        elif isinstance(default, list):
+            ok = isinstance(value, list)
+            if ok and prefix == "hotkeys." and key in HOTKEY_LISTS:
+                clean = [c for c in value if isinstance(c, list) and c and all(isinstance(t, str) and t for t in c)]
+                if len(clean) != len(value):
+                    data[key] = clean if clean or key != "activate" else copy.deepcopy(default)
+                    fixed.append(path)
+        if not ok:
+            data[key] = copy.deepcopy(default)
+            fixed.append(path)
+    return fixed
+
 
 def migrate_settings(data: dict, version: int) -> None:
     """Обновление сохранённых настроек при смене поведения по умолчанию."""
@@ -233,8 +300,15 @@ class Settings:
         if not isinstance(raw, dict):
             raw = {}
         data = deep_merge(DEFAULTS, raw)
-        if raw and int(raw.get("settings_version", 1) or 1) < SETTINGS_VERSION:
-            migrate_settings(data, int(raw.get("settings_version", 1) or 1))
+        try:
+            version = int(raw.get("settings_version", 1) or 1)
+        except (TypeError, ValueError):
+            version = 1
+        if raw and version < SETTINGS_VERSION:
+            migrate_settings(data, version)
+        fixed = sanitize(data)
+        if fixed:
+            logging.getLogger(__name__).warning("Исправлены неверные настройки: %s", ", ".join(fixed))
         data["settings_version"] = SETTINGS_VERSION
         return data
 
@@ -276,9 +350,34 @@ class Settings:
         self.set(section, copy.deepcopy(DEFAULTS[section]))
 
 
+RESTART_CODE = 75          # приложение просит сторожа перезапустить его
+RESTARTS_FILE = STATE_DIR / "restarts.json"
+
+
+def restart_allowed(window_s: float = 1800, limit: int = 2) -> bool:
+    """Самоперезапуск — не чаще limit раз за window_s: если причина не уходит, по кругу не перезапускаемся."""
+    data = read_json_safely(RESTARTS_FILE) if RESTARTS_FILE.exists() else None
+    now = time.time()
+    recent = [r for r in (data or []) if isinstance(r, dict) and now - float(r.get("ts", 0) or 0) < window_s]
+    return len(recent) < limit
+
+
+def note_restart(reason: str) -> None:
+    data = read_json_safely(RESTARTS_FILE) if RESTARTS_FILE.exists() else None
+    items = [r for r in (data or []) if isinstance(r, dict)][-9:]
+    items.append({"ts": time.time(), "reason": reason})
+    try:
+        write_json_safely(RESTARTS_FILE, items)
+    except OSError:
+        pass
+
+
 def ensure_dirs() -> None:
     for path in (CONFIG_DIR, DATA_DIR, CACHE_DIR, STATE_DIR, MODELS_DIR, AUDIO_DIR):
-        path.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:   # вместо папки файл, нет прав — работаем без неё
+            logging.getLogger(__name__).warning("Не удалось создать %s: %s", path, exc)
 
 
 def find_model_dir(settings: Settings) -> Path | None:

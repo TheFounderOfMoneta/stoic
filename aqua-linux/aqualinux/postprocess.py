@@ -78,11 +78,9 @@ class TextProcessor:
 
     def load(self, entries: list[dict], replacements: list[dict]) -> None:
         """entries: [{term, sounds_like, fuzzy}]; replacements: [{from, to, preserve_case, strip_punct}]."""
-        self.entries = [DictEntry(e.get("term", "").strip(),
-                                  [s.strip() for s in e.get("sounds_like", []) if s.strip()],
-                                  e.get("fuzzy", True))
-                        for e in entries if e.get("term", "").strip()]
-        self.replacements = [r for r in replacements if (r.get("from") or "").strip()]
+        from .storage import clean_replacements, clean_terms
+        self.entries = [DictEntry(e["term"], e["sounds_like"], e["fuzzy"]) for e in clean_terms(entries)]
+        self.replacements = clean_replacements(replacements)
         compiled = []
         for rep in self.replacements:
             tail = r"[.!?…]*" if rep.get("strip_punct", True) else ""

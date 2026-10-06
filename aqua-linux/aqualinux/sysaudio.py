@@ -1,13 +1,20 @@
 """Звук системы во время диктовки: приглушить вывод или поставить плееры на паузу."""
 from __future__ import annotations
 
+import json
 import logging
+import queue
 import re
 import shutil
 import subprocess
 import threading
 
+from .config import STATE_DIR
+
 log = logging.getLogger(__name__)
+# Что Aqua выключила/поставила на паузу. Если приложение упадёт посреди диктовки, при
+# следующем запуске звук вернётся сам (иначе музыка осталась бы выключенной навсегда).
+STATE_FILE = STATE_DIR / "muted-by-aqua.json"
 
 
 def _run(args: list[str], timeout: float = 1.5) -> str:
@@ -18,13 +25,61 @@ def _run(args: list[str], timeout: float = 1.5) -> str:
 
 
 class SystemAudio:
+    """Команды выполняются в одном фоновом потоке строго по порядку: «вернуть звук» никогда
+    не обгонит «выключить звук» (иначе после короткой диктовки музыка осталась бы выключенной)."""
+
     def __init__(self):
-        self._lock = threading.Lock()
         self._muted_by_us = False
         self._paused_players: list[str] = []
         self._wpctl = shutil.which("wpctl")
         self._pactl = shutil.which("pactl")
         self._gdbus = shutil.which("gdbus")
+        self._queue: "queue.Queue" = queue.Queue()
+        self._worker = threading.Thread(target=self._run, name="sysaudio", daemon=True)
+        self._worker.start()
+        self._queue.put(self._recover)
+
+    def _run(self) -> None:
+        while True:
+            fn = self._queue.get()
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                log.debug("sysaudio", exc_info=True)
+            finally:
+                self._queue.task_done()
+
+    def _save_state(self) -> None:
+        try:
+            if self._muted_by_us or self._paused_players:
+                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                STATE_FILE.write_text(json.dumps({"muted": self._muted_by_us, "paused": self._paused_players}))
+            elif STATE_FILE.exists():
+                STATE_FILE.unlink()
+        except OSError:
+            pass
+
+    def _recover(self) -> None:
+        """Прошлый запуск завершился посреди диктовки — вернуть звук и плееры."""
+        try:
+            data = json.loads(STATE_FILE.read_text())
+        except (OSError, ValueError):
+            return
+        log.warning("Прошлый запуск не вернул звук системы — возвращаю")
+        if isinstance(data, dict):
+            if data.get("muted"):
+                self._set_mute(False)
+            for player in data.get("paused") or []:
+                if isinstance(player, str) and self._gdbus:
+                    self._player_call(player, "Play")
+        self._muted_by_us, self._paused_players = False, []
+        self._save_state()
+
+    def wait_idle(self, timeout: float = 3.0) -> None:
+        import time
+        deadline = time.monotonic() + timeout
+        while self._queue.unfinished_tasks and time.monotonic() < deadline:
+            time.sleep(0.01)
 
     # --------------------------------------------------------------- mute
     def _is_muted(self) -> bool | None:
@@ -70,27 +125,28 @@ class SystemAudio:
             return
 
         def work():
-            with self._lock:
-                if mode == "mute":
-                    if self._is_muted() is False:
-                        self._set_mute(True)
-                        self._muted_by_us = True
-                elif mode == "pause":
-                    for player in self._players():
-                        if self._status(player) == "Playing":
-                            self._player_call(player, "Pause")
-                            self._paused_players.append(player)
+            if mode == "mute":
+                if not self._muted_by_us and self._is_muted() is False:
+                    self._muted_by_us = True
+                    self._save_state()          # сначала запоминаем — потом выключаем
+                    self._set_mute(True)
+            elif mode == "pause":
+                for player in self._players():
+                    if player not in self._paused_players and self._status(player) == "Playing":
+                        self._paused_players.append(player)
+                        self._save_state()
+                        self._player_call(player, "Pause")
 
-        threading.Thread(target=work, daemon=True).start()
+        self._queue.put(work)
 
     def end(self) -> None:
         def work():
-            with self._lock:
-                if self._muted_by_us:
-                    self._set_mute(False)
-                    self._muted_by_us = False
-                for player in self._paused_players:
-                    self._player_call(player, "Play")
-                self._paused_players = []
+            if self._muted_by_us:
+                self._set_mute(False)
+                self._muted_by_us = False
+            for player in self._paused_players:
+                self._player_call(player, "Play")
+            self._paused_players = []
+            self._save_state()
 
-        threading.Thread(target=work, daemon=True).start()
+        self._queue.put(work)

@@ -151,6 +151,8 @@ class X11KeyListener:
         self._local = None
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
+        self.keycodes: dict[str, int] = {}      # имя клавиши → keycode (для сверки «залипших»)
+        self._query_dpy = None
 
     def start(self) -> None:
         self._local = display.Display()
@@ -174,8 +176,36 @@ class X11KeyListener:
     def alive(self) -> bool:
         return bool(self._threads) and all(t.is_alive() for t in self._threads)
 
+    def physically_down(self, names) -> dict[str, Optional[bool]]:
+        """Нажаты ли клавиши на самом деле (XQueryKeymap). None — не знаем (кнопка мыши и т.п.).
+        Нужно, чтобы «залипшая» клавиша (потерянное отпускание: блокировка экрана, смена
+        консоли, сбой X) не держала запись и вставку бесконечно."""
+        out: dict[str, Optional[bool]] = {}
+        try:
+            if self._query_dpy is None:
+                self._query_dpy = display.Display()
+            keymap = self._query_dpy.query_keymap()
+        except Exception:  # noqa: BLE001
+            self._query_dpy = None
+            return {name: None for name in names}
+        for name in names:
+            code = self.keycodes.get(name)
+            if code is None and name.startswith("keycode") and name[7:].isdigit():
+                code = int(name[7:])
+            if code is None or not 0 < code < 256:
+                out[name] = None
+            else:
+                out[name] = bool(keymap[code // 8] & (1 << (code % 8)))
+        return out
+
     def stop(self) -> None:
         self._stop.set()
+        try:
+            if self._query_dpy is not None:
+                self._query_dpy.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._query_dpy = None
         try:
             if self._ctx is not None and self._local is not None:
                 self._local.record_disable_context(self._ctx)
@@ -205,6 +235,7 @@ class X11KeyListener:
                 name = keysym_name(keysym) if keysym else None
                 if not name:
                     name = f"keycode{event.detail}"
+                self.keycodes[name] = event.detail
                 kind = "press" if event.type == X.KeyPress else "release"
             elif event.type in (X.ButtonPress, X.ButtonRelease):
                 if event.detail < 8:  # 1-3 клики, 4-7 колесо — не трогаем

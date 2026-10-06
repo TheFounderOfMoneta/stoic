@@ -28,6 +28,7 @@ class Source:
     volume_db: Optional[float] = None   # громкость в дБ относительно 100 %
     base_db: Optional[float] = None     # где у оборудования «0 дБ» (base volume)
     volume_pct: Optional[float] = None
+    muted: Optional[bool] = None        # выключен в системе (кнопкой на клавиатуре, в настройках звука)
 
     @property
     def gain_db(self) -> Optional[float]:
@@ -102,7 +103,9 @@ def parse_pactl_sources(data: list, default_name: str = "") -> list[Source]:
             continue
         desc = item.get("description") or props.get("device.description") or name
         vol_db, vol_pct = _channel_db(item.get("volume"))
-        out.append(Source(name, desc, name == default_name, vol_db, _parse_db(item.get("base_volume")), vol_pct))
+        mute = item.get("mute")
+        out.append(Source(name, desc, name == default_name, vol_db, _parse_db(item.get("base_volume")), vol_pct,
+                          mute if isinstance(mute, bool) else None))
     return out
 
 
@@ -138,37 +141,97 @@ def parse_pw_dump(data: list) -> list[Source]:
 
 _cache: tuple[float, list[Source]] = (0.0, [])
 _cache_lock = threading.Lock()
+_refreshing = False
+_refreshed = threading.Event()       # хотя бы одно обновление закончилось
 
 
-def list_sources(max_age: float = 3.0) -> list[Source]:
-    """Микрофоны (без «мониторов» выходов). Кэш на несколько секунд — вызывается часто."""
+def _ui_thread() -> bool:
+    """Главный поток работающего приложения — его нельзя задерживать вызовами pactl."""
+    if threading.current_thread() is not threading.main_thread():
+        return False
+    try:
+        from PySide6.QtCore import QCoreApplication
+        return QCoreApplication.instance() is not None
+    except ImportError:
+        return False
+
+
+def _fetch() -> list[Source]:
+    sources: list[Source] = []
+    pactl = shutil.which("pactl")
+    if pactl:
+        raw = _run([pactl, "--format=json", "list", "sources"])
+        default = _run([pactl, "get-default-source"]).strip()
+        try:
+            sources = parse_pactl_sources(json.loads(raw), default) if raw.strip() else []
+        except (ValueError, AttributeError, TypeError):
+            sources = []
+    if not sources and shutil.which("pw-dump"):
+        raw = _run(["pw-dump"], timeout=3.0)
+        try:
+            sources = parse_pw_dump(json.loads(raw)) if raw.strip() else []
+        except (ValueError, AttributeError, TypeError):
+            sources = []
+    return sources
+
+
+def _fetch_and_store() -> list[Source]:
     global _cache
+    sources = _fetch()          # pactl — без блокировки: читатели не ждут
     with _cache_lock:
-        if time.monotonic() - _cache[0] < max_age:
-            return list(_cache[1])
-        sources: list[Source] = []
-        pactl = shutil.which("pactl")
-        if pactl:
-            raw = _run([pactl, "--format=json", "list", "sources"])
-            default = _run([pactl, "get-default-source"]).strip()
-            try:
-                sources = parse_pactl_sources(json.loads(raw), default) if raw.strip() else []
-            except ValueError:
-                sources = []
-        if not sources and shutil.which("pw-dump"):
-            raw = _run(["pw-dump"], timeout=3.0)
-            try:
-                sources = parse_pw_dump(json.loads(raw)) if raw.strip() else []
-            except ValueError:
-                sources = []
         _cache = (time.monotonic(), sources)
-        return list(sources)
+    _refreshed.set()
+    return list(sources)
+
+
+def _refresh_async() -> None:
+    global _refreshing
+    with _cache_lock:
+        if _refreshing:
+            return
+        _refreshing = True
+
+    def work():
+        global _refreshing
+        try:
+            _fetch_and_store()
+        finally:
+            with _cache_lock:
+                _refreshing = False
+
+    threading.Thread(target=work, name="pw-sources", daemon=True).start()
+
+
+def list_sources(max_age: float = 3.0, wait: Optional[bool] = None) -> list[Source]:
+    """Микрофоны (без «мониторов» выходов). Кэш на несколько секунд — вызывается часто.
+    В главном потоке приложения не ждём pactl (если PipeWire завис, меню трея и окно
+    не должны замирать): отдаём последний известный список и обновляем его в фоне."""
+    if wait is None:
+        wait = not _ui_thread()
+    with _cache_lock:
+        fresh = time.monotonic() - _cache[0] < max_age
+        cached = list(_cache[1])
+    if fresh:
+        return cached
+    if not wait:
+        _refresh_async()
+        if not cached and not _refreshed.is_set():
+            _refreshed.wait(0.5)        # самый первый список: чуть подождать фонового обновления
+            with _cache_lock:
+                cached = list(_cache[1])
+        return cached
+    return _fetch_and_store()
+
+
+def prefetch() -> None:
+    """Заполнить кэш заранее (при запуске) — первое открытие меню сразу со списком."""
+    _refresh_async()
 
 
 def invalidate() -> None:
     global _cache
     with _cache_lock:
-        _cache = (0.0, [])
+        _cache = (0.0, _cache[1])     # устарел, но для окна сгодится, пока не обновится
 
 
 def current_source(setting_value) -> Optional[Source]:
@@ -246,6 +309,22 @@ def _wpctl_id(node_name: str) -> Optional[str]:
     except ValueError:
         pass
     return None
+
+
+def unmute(setting_value=None) -> bool:
+    """Включить микрофон, выключенный в системе (кнопка «микрофон» на клавиатуре и т. п.)."""
+    invalidate()
+    src = current_source(setting_value)
+    pactl, wpctl = shutil.which("pactl"), shutil.which("wpctl")
+    if pactl:
+        _run([pactl, "set-source-mute", src.name if src is not None else "@DEFAULT_SOURCE@", "0"])
+    elif wpctl:
+        _run([wpctl, "set-mute", "@DEFAULT_AUDIO_SOURCE@", "0"])
+    else:
+        return False
+    invalidate()
+    src = current_source(setting_value)
+    return src is None or src.muted is not True
 
 
 def gain_report(setting_value=None) -> str:

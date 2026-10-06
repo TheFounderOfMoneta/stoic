@@ -10,6 +10,7 @@ import http.client
 import json
 import logging
 import re
+import socket
 import ssl
 import threading
 import time
@@ -117,25 +118,51 @@ class _ConnPool:
             conn.timeout = timeout
             if conn.sock is not None:
                 conn.sock.settimeout(timeout)
+            # Общий срок на весь ответ: сервер, который отдаёт ответ по байту в секунду, иначе
+            # держал бы запрос бесконечно (тайм-аут сокета считается на каждое чтение отдельно).
+            aborted = threading.Event()
+            guard = threading.Timer(timeout + 0.3, self._abort, args=(conn, aborted))
+            guard.daemon = True
+            guard.start()
             try:
                 conn.request("POST", path, body=payload, headers=headers)
                 resp = conn.getresponse()
                 data = resp.read()
             except (http.client.RemoteDisconnected, http.client.CannotSendRequest, http.client.BadStatusLine,
-                    BrokenPipeError, ConnectionResetError) as exc:
+                    http.client.IncompleteRead, BrokenPipeError, ConnectionResetError, OSError) as exc:
                 conn.close()
-                if fresh or attempt:
+                if aborted.is_set():
+                    raise LLMError("timed out: ответ не уложился в срок") from exc
+                if fresh or attempt or not isinstance(exc, (http.client.RemoteDisconnected,
+                                                             http.client.CannotSendRequest,
+                                                             http.client.BadStatusLine, BrokenPipeError,
+                                                             ConnectionResetError)):
                     raise LLMError(str(exc) or exc.__class__.__name__) from exc
                 continue      # сервер закрыл простаивавшее соединение — ещё раз на новом
             except Exception:
                 conn.close()
                 raise
+            finally:
+                guard.cancel()
+            if aborted.is_set():
+                conn.close()
+                raise LLMError("timed out: ответ не уложился в срок")
             if resp.will_close:
                 conn.close()
             else:
                 self._give(key, conn)
             return resp.status, data
         raise LLMError("соединение не установлено")
+
+    @staticmethod
+    def _abort(conn, aborted: threading.Event) -> None:
+        aborted.set()
+        sock = conn.sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
     def preconnect(self, url: str, timeout: float = 5.0) -> None:
         """Заранее открыть соединение (TCP+TLS), если свободного нет."""

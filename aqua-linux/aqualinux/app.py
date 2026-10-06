@@ -15,6 +15,8 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import re
+import shutil
 import threading
 import time
 from collections import deque
@@ -22,14 +24,15 @@ from typing import Optional
 
 import numpy as np
 
-from PySide6.QtCore import QMimeData, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QByteArray, QMimeData, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QClipboard, QGuiApplication
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
 
-from . import llm, perf, pwaudio
+from . import llm, perf, pwaudio, xclip
 from .asr.engine import ASREngine
-from .audio import Recorder, SoundPlayer, audio_backend_error, clipped_count, friendly_mic_error
+from . import audio as audio_backend
+from .audio import Recorder, SoundPlayer, clipped_count, friendly_mic_error
 from .config import APP_ID, Settings
 from .corrector import Corrector
 from .hotkeys import (MODIFIER_GENERIC, MODIFIER_TOKENS, HotkeyRecorder, KeyState, SelectionTracker,
@@ -38,17 +41,24 @@ from .inserter import X11Desktop, WindowInfo, xdotool_type
 from .localllm import LocalLLM
 from .postprocess import TextProcessor, casual, count_words, is_messenger, split_send_it
 from .storage import (DEFAULT_DICTIONARY, DEFAULT_REPLACEMENTS, History, JsonStore, migrate_dictionary,
-                      save_wav)
+                      sanitize_stores)
 from .sysaudio import SystemAudio
+from .sysevents import SystemEvents
 
 log = logging.getLogger(__name__)
 
 IPC_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", f"{APP_ID}-{os.getuid()}.sock")
-SAFE_MIME = ("text/", "image/png", "x-special/", "application/x-kde", "chromium/")
 CLIP_WARN_RATIO = 0.01     # больше 1 % сэмплов в потолок — микрофон перегружен
 CLIP_AUTOFIX_RATIO = 0.05  # больше 5 % — снижаем усиление сами (один раз, с кнопкой «Вернуть»)
 CLIP_SKIP_SAMPLES = 5600   # первые 0,35 с записи — щелчок при включении микрофона не считаем
 MIN_SPEECH_REPORT_S = 0.8  # «Речь не распознана» показываем только для записей длиннее
+LOW_DISK_MB = 300          # меньше — не сохраняем звук записей
+AUDIO_HANG_S = 6.0         # операция с микрофоном дольше — звуковая система зависла
+JOB_MAX_S = 300            # фраза обрабатывается дольше — что-то сломалось: звук в историю, облачко свободно
+LOADING_JOB_MAX_S = 1800   # пока модель грузится (первый запуск, медленный интернет) ждём дольше
+MIC_TEST_SID = -1
+SILENT_PEAK = 1e-4         # тише — не речь и не шум, а «цифровой ноль»: микрофон выключен
+KEYSYNC_MS = 500
 WATCHDOG_MS = 2000
 
 
@@ -93,6 +103,7 @@ class Session:
         self.ai_since: Optional[float] = None    # когда отдали ИИ
         self.asr_retries = 0
         self.reasr = False                # распознать целиком из self.audio (распознаватель перезапущен)
+        self.peak = 0.0                   # самый громкий сэмпл (0 — микрофон выключен в системе)
 
 
 class App(QObject):
@@ -115,6 +126,12 @@ class App(QObject):
     sig_heal_engine = Signal(str)
     sig_need_local = Signal()
     sig_notice_done = Signal(str, bool, str)
+    sig_disk = Signal(int)
+    sig_mic_result = Signal(int, bool, bool, str)
+    sig_typed = Signal(bool, str, bool)
+    sig_snapshot = Signal(object, int)
+    sig_prefetch = Signal(object, int)
+    sig_muted = Signal(int)            # 1 — выключен в системе, 0 — не выключен, но молчит
     # Для окна настроек
     status_changed = Signal(str, str)
     history_changed = Signal()
@@ -128,10 +145,11 @@ class App(QObject):
         super().__init__()
         self.qapp = qapp
         self.settings = settings
-        self.history = History()
+        self.history = History(on_change=self.history_changed.emit)
         self.dictionary = JsonStore("dictionary.json", DEFAULT_DICTIONARY)
-        migrate_dictionary(self.dictionary)
         self.replacements = JsonStore("replacements.json", DEFAULT_REPLACEMENTS)
+        sanitize_stores(self.dictionary, self.replacements)
+        migrate_dictionary(self.dictionary)
         self.processor = TextProcessor()
 
         self.sounds = SoundPlayer(settings.get("audio.sound_volume", 0.35))
@@ -169,16 +187,33 @@ class App(QObject):
         self._mic_sink = lambda block: None
         self._clip_history: deque = deque(maxlen=3)
         self._cancel_grabbed = False
-        self._outbox: deque = deque()               # очередь вставки (text, send)
+        self._outbox: deque = deque()               # очередь вставки (text, send, окно)
+        self._held_by_lock = False                  # в очереди есть текст, отложенный блокировкой экрана
+        self._resumed_at = 0.0
         self._insert_busy = False
         self._insert_wait_since: Optional[float] = None
-        self._clip_restore: Optional[QMimeData] = None
+        self._clip_restore: Optional[dict] = None   # снимок буфера {MIME: bytes} до серии вставок
+        self._clip_snapped = False
+        self._snap_seq = 0
+        self._snap_pending = None
+        self._prefetched = None                      # (снимок, поколение буфера, когда)
+        self._prefetching = False
+        self._clip_gen = 0                           # растёт при каждой смене содержимого буфера
         self._clip_text = ""
         self._clip_warned_at = 0.0
         self._llm_started_once = False
         self._insert_started = 0.0
+        self._insert_limit = 8.0
         self._load_retries = 0
         self._clip_autofixed_at = 0.0
+        self._low_disk = False
+        self._audio_hang = False
+        self._restart_reason = ""
+        self._last_key_event = 0.0
+        # Сверка «залипших» клавиш — только пока что-то считается нажатым.
+        self._keysync_timer = QTimer(self)
+        self._keysync_timer.setInterval(KEYSYNC_MS)
+        self._keysync_timer.timeout.connect(self._sync_keys)
         self.notices: dict[str, tuple[str, str, str]] = {}   # key → (kind, текст, кнопка)
 
         from .ui.bubble import Bubble
@@ -204,12 +239,24 @@ class App(QObject):
         self.sig_cloud_failed.connect(self._on_cloud_failed)
         self.sig_need_local.connect(self._start_local_fallback)
         self.sig_notice_done.connect(self._on_notice_done)
+        self.sig_disk.connect(self._on_disk)
+        self.sig_mic_result.connect(self._on_mic_result, Qt.QueuedConnection)
+        self.sig_typed.connect(self._typed)
+        self.sig_muted.connect(self._on_muted)
+        self.sig_snapshot.connect(self._on_snapshot)
+        self.sig_prefetch.connect(self._on_prefetch)
+        QGuiApplication.clipboard().dataChanged.connect(self._clip_changed)
+        # Блокировка экрана и сон (D-Bus): не писать на экране блокировки, чинить всё после сна.
+        self.sysevents = SystemEvents(self)
+        self.sysevents.lock_changed.connect(self._on_lock)
+        self.sysevents.sleep_changed.connect(self._on_sleep)
         self._retranscribe_callbacks: dict[int, object] = {}
         self.settings.on_change(self._on_setting)
 
         self.window = None
         self.tray = None
         self.quitting = False
+        self.exit_code = 0                  # 75 — сторож должен запустить заново
         self.server: Optional[QLocalServer] = None
 
     # ================================================================ состояние
@@ -226,9 +273,8 @@ class App(QObject):
 
     # ================================================================ запуск
     def start_services(self) -> None:
-        err = audio_backend_error()
-        if err:
-            log.error(err)
+        audio_backend.preload()      # PortAudio — в фоне: зависшая звуковая система не держит запуск
+        pwaudio.prefetch()           # список микрофонов — тоже заранее и в фоне
         try:
             self.listener = X11KeyListener(self.sig_key.emit)
             self.listener.start()
@@ -262,10 +308,14 @@ class App(QObject):
         self._watchdog_timer = QTimer(self)
         self._watchdog_timer.timeout.connect(self._watchdog)
         self._watchdog_timer.start(WATCHDOG_MS)
-        purge = QTimer(self)
-        purge.timeout.connect(lambda: self.history.purge_audio(int(self.settings.get("audio.keep_audio_days", 3))))
-        purge.start(3600 * 1000)
-        QTimer.singleShot(5000, lambda: self.history.purge_audio(int(self.settings.get("audio.keep_audio_days", 3))))
+        # Обслуживание раз в час: старая история и звук, место на диске, мусорные файлы.
+        self._maintenance_timer = QTimer(self)
+        self._maintenance_timer.timeout.connect(self._maintenance)
+        self._maintenance_timer.start(3600 * 1000)
+        QTimer.singleShot(5000, self._maintenance)
+        if not self.history.persistent:
+            self.set_notice("storage", "warn", "История не сохраняется: нет доступа к папке данных ("
+                            + self.history.problem[:120] + "). Диктовка работает как обычно.", "")
 
     def quit_app(self) -> None:
         """Полный выход. QApplication.quit() в Qt 6 сначала закрывает окна, а главное окно
@@ -283,7 +333,10 @@ class App(QObject):
                      self.local_llm.stop,
                      lambda: self.recorder.set_warm(False),
                      lambda: self.recorder.stop(),
-                     self.sysaudio.end):
+                     lambda: self.recorder.wait_idle(1.5),
+                     self.sysaudio.end,
+                     lambda: self.sysaudio.wait_idle(2.0),
+                     lambda: self.history.close(3.0)):
             try:
                 step()
             except Exception:  # noqa: BLE001
@@ -295,14 +348,10 @@ class App(QObject):
             text = sess.text if sess.text else (self.processor.process(sess.raw, self.settings) if sess.raw else "")
             if not text.strip() or self.settings.get("general.privacy_mode", False):
                 continue
-            audio_path = None
-            if sess.audio and self.settings.get("audio.save_audio", True):
-                try:
-                    audio_path = save_wav(np.concatenate(sess.audio))
-                except Exception:  # noqa: BLE001
-                    pass
+            audio = np.concatenate(sess.audio) if sess.audio and self.settings.get("audio.save_audio", True) \
+                else None
             self.history.add(text.strip(), sess.raw or text, sess.window.app, sess.window.title, "dictation",
-                             sess.samples / 16000, count_words(text), 0.0, audio_path)
+                             sess.samples / 16000, count_words(text), 0.0, audio)
 
     def hint_text(self) -> str:
         combos = self.settings.get("hotkeys.activate") or []
@@ -359,6 +408,12 @@ class App(QObject):
             self.paste_last()
         elif cmd in ("show", "settings", "history"):
             self.show_window({"show": "home", "settings": "settings", "history": "history"}[cmd])
+        elif cmd == "restart":
+            # Перезапуск по просьбе человека: сторож поднимет приложение заново, когда закончим фразы.
+            if os.environ.get("AQUA_SUPERVISED") == "1":
+                self._restart_reason = "по команде"
+            else:
+                log.warning("Перезапуск недоступен: Aqua запущена без сторожа (--no-supervisor)")
         elif cmd == "quit":
             self.quit_app()
 
@@ -400,6 +455,9 @@ class App(QObject):
         changed = self.keys.press(name) if kind == "press" else self.keys.release(name)
         if not changed:
             return
+        self._last_key_event = time.monotonic()
+        if self.keys.down and not self._keysync_timer.isActive():
+            self._keysync_timer.start()
         self.selection.note_input(kind, name, self.keys)
         if self.hotkey_recorder.active:
             self.hotkey_recorder.feed(kind, name)
@@ -408,6 +466,8 @@ class App(QObject):
             return
 
         activate = self._combos("activate")
+        if kind == "press" and self.sysevents.locked and self.rec is None:
+            return      # экран блокировки: Правый Alt нужен для ввода пароля, не для диктовки
         if kind == "press":
             if (self.rec is not None or self.jobs) and any(self.keys.matches(c) for c in self._combos("cancel")):
                 self.cancel()
@@ -440,6 +500,21 @@ class App(QObject):
                 self._activate_release(t)
             if not self.keys.any_modifier() and self._outbox:
                 QTimer.singleShot(0, self._pump_insert)
+
+    @guarded
+    def _sync_keys(self) -> None:
+        """Отпускание клавиши потерялось (заблокировали экран с зажатым Alt, переключили консоль,
+        X-сервер подвис) — без сверки запись шла бы до лимита, а вставка ждала бы отпускания."""
+        if not self.keys.down:
+            self._keysync_timer.stop()
+            return
+        if self.listener is None or time.monotonic() - self._last_key_event < 0.4:
+            return
+        state = self.listener.physically_down(list(self.keys.down))
+        for name, down in state.items():
+            if down is False and name in self.keys.down:
+                log.warning("Отпускание клавиши %s потерялось — отпускаю сам", name)
+                self._on_key("release", name, time.monotonic())
 
     def _activate_press(self, t: float) -> None:
         rec = self.rec
@@ -486,6 +561,8 @@ class App(QObject):
             self.desktop.tap_keycode(code)
 
     def _bubble_clicked(self) -> None:
+        if self.sysevents.locked and self.rec is None:
+            return
         if self.rec is not None:
             self.finish()
         else:
@@ -493,37 +570,34 @@ class App(QObject):
 
     # ================================================================ запись
     def start(self, mode: str, t: Optional[float] = None) -> bool:
-        if self.rec is not None:
+        if self.rec is not None or self.sysevents.locked:
             return False
         if self._tail is not None:
             # Предыдущая запись: отдать распознавателю; микрофон не закрываем — он сразу нужен.
             self._end_tail(self._tail, keep_open=True)
         if self._mic_test:
             self._mic_test = False
-        window = self.desktop.active_window()
-        kind, selection = "dictation", ""
-        if self.settings.get("edit_mode.enabled", True) and self.selection.is_live():
-            text = read_x_selection("PRIMARY")
-            if text.strip() and len(text) <= int(self.settings.get("edit_mode.max_chars", 6000)):
-                kind, selection = "edit", text
+            self.recorder.stop(self._mic_sink, close=False)
         self._sid += 1
-        sess = Session(self._sid, mode, kind, window, selection)
+        sess = Session(self._sid, mode, "dictation", WindowInfo())
         if t is not None:
             sess.t_down = t
         streaming = self.settings.get("asr.streaming", "hands_free")
         preview = streaming == "always" or (streaming == "hands_free" and mode == "hands_free")
         # Порядок важен: сессия в распознавателе → сессия в приложении → микрофон.
-        # Тогда даже первые блоки и предзапись попадают в эту запись.
+        # Тогда даже первые блоки и предзапись попадают в эту запись. Микрофон открывается
+        # в фоне — облачко появляется сразу, даже если звуковая система тормозит.
         self.engine.begin(sess.sid, preview)
         sess.sink = self._make_sink(sess)
         self.rec = sess
-        if not self._open_mic(sess):
-            self.rec = None
-            self.engine.cancel(sess.sid)
-            self._refresh()
-            if self.settings.get("audio.sounds", True):
-                self.sounds.play("error")
-            return False
+        self._open_mic(sess)
+        # Окно и выделение узнаём, пока микрофон открывается.
+        sess.window = self.desktop.active_window()
+        if self.settings.get("edit_mode.enabled", True) and self.selection.is_live():
+            text = read_x_selection("PRIMARY")
+            if text.strip() and len(text) <= int(self.settings.get("edit_mode.max_chars", 6000)):
+                sess.kind, sess.selection = "edit", text
+        kind, selection = sess.kind, sess.selection
         if self.corrector.active() and self.router.cloud() is not None:
             # Пока человек говорит, заранее открываем соединение с DeepSeek.
             threading.Thread(target=llm.preconnect, args=(self.router.cloud().base,), daemon=True).start()
@@ -542,29 +616,52 @@ class App(QObject):
         QTimer.singleShot(limit_ms, lambda: self._limit_reached(sid))
         return True
 
-    def _open_mic(self, sess: Session) -> bool:
-        """Включить микрофон. Выбранный не открылся — сами берём системный, без вопросов."""
-        device = self.settings.get("audio.input_device")
-        try:
-            self.recorder.start(device, sess.sink)
-            return True
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Микрофон %r не открылся: %s", device, exc)
-            first = exc
-        if device is not None:
-            try:
-                self.recorder.start(None, sess.sink)
+    def _open_mic(self, sess: Session) -> None:
+        """Включить микрофон (в фоне). Выбранный не открылся — сами берём системный, без вопросов."""
+        sid = sess.sid
+
+        def result(ok, fallback, error):
+            self.sig_mic_result.emit(sid, bool(ok), bool(fallback), friendly_mic_error(error) if error else "")
+
+        self.recorder.start(self.settings.get("audio.input_device"), sess.sink, on_result=result, fallback=True)
+
+    @Slot(int, bool, bool, str)
+    @guarded
+    def _on_mic_result(self, sid: int, ok: bool, fallback: bool, reason: str) -> None:
+        if sid == MIC_TEST_SID:
+            if not ok:
+                self._mic_test = False
+                self.status_changed.emit("mic-error", reason)
+            return
+        if ok:
+            if fallback:
                 self.set_notice("mic", "info", "Выбранный микрофон недоступен — пишу с системного. "
                                 "Когда он снова подключится, Aqua вернётся к нему сама.", "")
-                return True
-            except Exception as exc:  # noqa: BLE001
-                first = exc
-        reason = friendly_mic_error(first)
+            return
+        log.warning("Микрофон не включился: %s", reason)
+        if self.rec is not None and self.rec.sid == sid:
+            self.rec = None
+            self._press_sid = None
+            self.engine.cancel(sid)
+            self.sysaudio.end()
+        elif sid in self.jobs:
+            sess = self.jobs[sid]
+            if self._tail is sess:
+                self._tail = None
+            self.engine.cancel(sid)
+            self._skip(sess)
+            if self.rec is None:
+                self.sysaudio.end()
+        else:
+            return
+        self.bubble.set_live_text("")
+        self._refresh()
+        if self.settings.get("audio.sounds", True):
+            self.sounds.play("error")
         self.bubble.show_message(f"Микрофон: {reason}"[:80], "error", 4000)
         self.set_notice("mic", "error", f"Не получилось включить микрофон: {reason}. Проверьте, что он "
                         "подключён и не занят другой программой — Aqua попробует снова при следующем нажатии.",
                         "Выбрать микрофон")
-        return False
 
     def _make_sink(self, sess: Session):
         """Приёмник аудио, навсегда привязанный к своей сессии (вызывается из потока PortAudio)."""
@@ -575,6 +672,8 @@ class App(QObject):
             sess.audio.append(block)
             sess.samples += block.size
             sess.last_block = time.monotonic()
+            if sess.peak < SILENT_PEAK:
+                sess.peak = max(sess.peak, float(np.abs(block).max()) if block.size else 0.0)
             # Первые 0,35 с не считаем: при включении микрофона (особенно после сна или в режиме
             # энергосбережения) звуковая карта даёт щелчок — это не перегруз.
             if sess.samples > CLIP_SKIP_SAMPLES:
@@ -622,6 +721,7 @@ class App(QObject):
         if self._tail is not None:
             self._end_tail(self._tail)
         self._tail = sess
+        self._prefetch_clipboard()
         QTimer.singleShot(int(self.settings.get("audio.tail_ms", 140)), lambda: self._end_tail(sess))
         self._refresh()
 
@@ -644,6 +744,7 @@ class App(QObject):
         if self.settings.get("audio.sounds", True):
             QTimer.singleShot(60, lambda: self.sounds.play("stop"))
         self._check_clipping(sess)
+        self._check_silence(sess)
 
     def _drop_recording(self, silent: bool = True) -> None:
         sess = self.rec
@@ -653,7 +754,6 @@ class App(QObject):
         self._press_sid = None
         self.recorder.stop(sess.sink)
         self.engine.cancel(sess.sid)
-        self.corrector.forget(sess.sid)
         self.sysaudio.end()
         self._after_cancel(silent)
 
@@ -663,7 +763,6 @@ class App(QObject):
                 self._tail = None
                 self.recorder.stop(sess.sink)
             self.engine.cancel(sess.sid)
-            self.corrector.forget(sess.sid)
         self.jobs.clear()
         if self.rec is None:
             self.sysaudio.end()
@@ -732,6 +831,34 @@ class App(QObject):
             self.sig_clip.emit(ratio, -1.0 if gain is None else float(gain))
         threading.Thread(target=work, daemon=True).start()
 
+    def _check_silence(self, sess: Session) -> None:
+        """Целая секунда «цифрового нуля» — микрофон выключен (кнопкой на клавиатуре, в настройках
+        звука, выключателем на гарнитуре). Говорим об этом прямо, а не «речь не распознана»."""
+        if sess.samples < 16000 or sess.peak >= SILENT_PEAK:
+            if "mute" in self.notices and sess.samples >= 16000:
+                self.clear_notice("mute")
+            return
+        device = self.settings.get("audio.input_device")
+
+        def work():
+            src = pwaudio.current_source(device)
+            self.sig_muted.emit(1 if src is not None and src.muted else 0)
+        threading.Thread(target=work, name="mute-check", daemon=True).start()
+
+    @Slot(int)
+    @guarded
+    def _on_muted(self, muted: int) -> None:
+        if muted:
+            self.set_notice("mute", "error", "Микрофон выключен в системе (кнопкой на клавиатуре или в "
+                            "настройках звука) — Aqua слышит тишину.", "Включить микрофон")
+            message = "Микрофон выключен в системе — см. главное окно"
+        else:
+            self.set_notice("mute", "warn", "Микрофон передаёт полную тишину. Проверьте выключатель на "
+                            "гарнитуре или выберите другой микрофон.", "Выбрать микрофон")
+            message = "Микрофон молчит — см. главное окно"
+        if self.rec is None:
+            QTimer.singleShot(400, lambda: self.rec is None and self.bubble.show_message(message, "warn", 3500))
+
     @Slot(float, float)
     @guarded
     def _on_clip(self, ratio: float, gain: float) -> None:
@@ -776,6 +903,8 @@ class App(QObject):
             else:
                 self.set_notice("engine", "error", "Распознавание не запускается: " + message +
                                 " Aqua продолжит попытки; подробности — в журнале.", "Попробовать снова")
+                # И дальше пробуем сами — раз в 5 минут (интернет появится, диск освободится).
+                QTimer.singleShot(300_000, lambda: self.engine.state == "error" and self.engine.reload())
         elif state in ("ready", "degraded"):
             self._load_retries = 0
             self.clear_notice("engine")
@@ -862,9 +991,13 @@ class App(QObject):
                                  sess.window.title):
             processed = casual(processed)
         sess.send = send
-        if processed and sess.raw[:1].islower() and self.desktop.paste_keys_for(sess.window)[0] == \
-                ["Control_L", "Shift_L"]:
-            processed = processed[0].lower() + processed[1:]   # в терминале команду с заглавной не начинаем
+        terminal = self.desktop.paste_keys_for(sess.window)[0] in (["Control_L", "Shift_L"], ["Shift_L"])
+        if processed and terminal:
+            # В терминале перевод строки — это Enter: многострочный текст (абзацы, списки ИИ)
+            # выполнился бы по кускам. Вставляем одной строкой.
+            processed = one_line(processed)
+            if sess.raw[:1].islower():
+                processed = processed[0].lower() + processed[1:]   # команду с заглавной не начинаем
         if sess.kind == "edit" and self.settings.get("llm.enabled", False) and self.router.available():
             self._run_llm(sess, processed)
         else:
@@ -917,11 +1050,9 @@ class App(QObject):
         """Распознать так и не вышло: звук сохраняем в историю, чтобы ничего не пропало."""
         try:
             if sess.audio and not self.settings.get("general.privacy_mode", False):
-                path = save_wav(np.concatenate(sess.audio))
                 self.history.add("⚠ Запись не распознана — её можно прослушать и повторить", "",
                                  sess.window.app, sess.window.title, "dictation", sess.samples / 16000, 0, 0.0,
-                                 path)
-                self.history_changed.emit()
+                                 np.concatenate(sess.audio))
         except Exception:  # noqa: BLE001
             log.exception("Не удалось сохранить нераспознанную запись")
         self._skip(sess)
@@ -938,7 +1069,7 @@ class App(QObject):
                     sess.text = base or ""
                 sess.skip = not sess.text
                 self._flush()
-        if where in ("_pump_insert", "_paste", "_typed", "_insert_done"):
+        if where in ("_pump_insert", "_paste", "_typed", "_insert_done", "_on_snapshot"):
             self._insert_busy = False
             QTimer.singleShot(200, self._pump_insert)
         self._refresh()
@@ -982,15 +1113,17 @@ class App(QObject):
                         sess.ai_since = None
                         self._after_correction(sess, getattr(sess, "pre", "") or sess.raw)
             # Вставка «застряла» (окно не ответило, X-сервер подвис).
-            if self._insert_busy and now - self._insert_started > 8:
+            if self._insert_busy and now - self._insert_started > self._insert_limit:
                 log.warning("Вставка не завершилась — сбрасываю очередь вставки")
                 self._insert_busy = False
                 self._pump_insert()
+            elif self._outbox and not self._insert_busy and not self.sysevents.locked:
+                self._pump_insert()     # например, сигнал о разблокировке экрана потерялся
             # Клавиатура: поток XRecord умер (например, после смены раскладки или сбоя X).
             if self.listener is not None and not self.listener.alive():
                 self._restart_listener()
             # Микрофон открыт, а он никому не нужен (утечка, сбой) — закрываем: значок гаснет.
-            if self.rec is None and self._tail is None and not self._mic_test and hasattr(self.recorder, "close_if_unused"):
+            if self.rec is None and self._tail is None and not self._mic_test:
                 if self.recorder.close_if_unused():
                     log.warning("Микрофон оставался открытым без записи — закрыт")
             # Проверка микрофона в окне — не дольше минуты и только пока окно на экране.
@@ -1004,14 +1137,124 @@ class App(QObject):
             # Микрофон замолчал посреди записи (отключили USB, PipeWire перезапустился).
             rec = self.rec
             if rec is not None and now - rec.started > 1.5 and now - rec.last_block > 2.0 \
-                    and hasattr(self.recorder, "reopen"):
+                    and not self.recorder.stuck_for():
                 log.warning("Микрофон замолчал — переподключаю")
                 rec.last_block = now
-                if not self.recorder.reopen(self.settings.get("audio.input_device")):
-                    self.recorder.reopen(None)
+                self.recorder.reopen(self.settings.get("audio.input_device"))
                 self.bubble.show_message("Микрофон переподключён — продолжайте", "info", 1500)
+            # Звуковая система не отвечает (PipeWire завис): запись заканчиваем тем, что успели
+            # записать, и перезапускаемся, как только освободимся, — в новом процессе звук оживает.
+            stuck = self.recorder.stuck_for()
+            if stuck > AUDIO_HANG_S:
+                self._on_audio_hang(stuck)
+            elif self._audio_hang and not stuck:
+                self._audio_hang = False
+                self.clear_notice("audio")
+            # Фраза не может обрабатываться вечно: что бы ни сломалось, облачко не «висит».
+            loading = self.engine.state in ("loading", "downloading")
+            for sess in list(self.jobs.values()):
+                ref = sess.ai_since or sess.asr_since
+                if sess.text is not None or ref is None:
+                    continue
+                if now - ref > (LOADING_JOB_MAX_S if loading else JOB_MAX_S):
+                    log.error("Фраза #%d обрабатывается %.0f с — освобождаю очередь", sess.sid, now - ref)
+                    if not sess.raw:
+                        self._keep_unrecognized(sess)       # звук — в историю, его можно повторить
+                    elif sess.kind == "edit":
+                        self._skip(sess)                    # правка не удалась — выделенное не трогаем
+                    else:
+                        sess.ai_since = None                # текст есть — вставляем без ИИ
+                        self._after_correction(sess, getattr(sess, "pre", "") or sess.raw)
+                elif loading and now - ref > 30 and not getattr(sess, "told_loading", False):
+                    sess.told_loading = True
+                    if self.rec is None:
+                        self.bubble.show_message("Распознавание ещё загружается — фраза не потеряется", "info",
+                                                 3000)
+            if self._restart_reason and self.rec is None and not self.jobs and not self._outbox \
+                    and not self._insert_busy and self._tail is None:
+                self._restart_now()
         except Exception:  # noqa: BLE001
             log.exception("Сбой сторожа")
+
+    # ---------------------------------------------------------------- обслуживание
+    def _maintenance(self) -> None:
+        """Раз в час: удалить старую историю (по умолчанию старше недели) и звук, проверить место."""
+        keep = int(self.settings.get("general.history_days", 7) or 0)
+        audio_days = int(self.settings.get("audio.keep_audio_days", 3) or 3)
+        if keep:
+            audio_days = min(audio_days, keep)
+        self.history.purge(keep, audio_days)
+        threading.Thread(target=self._housekeeping, name="housekeeping", daemon=True).start()
+
+    def _housekeeping(self) -> None:
+        from .config import CONFIG_DIR, DATA_DIR, STATE_DIR
+        try:
+            free_mb = shutil.disk_usage(DATA_DIR).free // (1 << 20)
+        except OSError:
+            free_mb = -1
+        self.sig_disk.emit(int(free_mb))
+        # Отложенные повреждённые файлы (*.broken-*) — не дольше 30 дней.
+        cutoff = time.time() - 30 * 86400
+        for folder in (CONFIG_DIR, DATA_DIR):
+            try:
+                for entry in os.scandir(folder):
+                    if ".broken-" in entry.name and entry.stat().st_mtime < cutoff:
+                        os.remove(entry.path)
+            except OSError:
+                pass
+        # Журнал аварий не растёт бесконечно.
+        crash = STATE_DIR / "crash.log"
+        try:
+            if crash.stat().st_size > 1_000_000:
+                with open(crash, "rb") as fh:
+                    fh.seek(-200_000, os.SEEK_END)
+                    tail = fh.read()
+                with open(crash, "wb") as fh:
+                    fh.write(tail)
+        except OSError:
+            pass
+
+    @Slot(int)
+    def _on_disk(self, free_mb: int) -> None:
+        self._low_disk = 0 <= free_mb < LOW_DISK_MB
+        if self._low_disk:
+            self.set_notice("disk", "warn", f"На диске почти не осталось места ({free_mb} МБ). Aqua продолжает "
+                            "работать, но не сохраняет звук записей. Освободите место — всё вернётся само.", "")
+        else:
+            self.clear_notice("disk")
+
+    def _on_audio_hang(self, stuck: float) -> None:
+        if self._audio_hang:
+            return
+        self._audio_hang = True
+        log.error("Звуковая система не отвечает %.0f с (%s)", stuck, getattr(self.recorder, "_busy_what", ""))
+        if self.rec is not None:
+            self.finish()
+        self.bubble.show_message("Звук не отвечает — Aqua перезапустится сама", "warn", 4000)
+        self.set_notice("audio", "error", "Звуковая система (PipeWire) перестала отвечать. Aqua перезапустит "
+                        "себя, как только закончит текущие фразы. Если не поможет — перезапустите звук: "
+                        "systemctl --user restart pipewire pipewire-pulse wireplumber", "")
+        self._request_restart("звуковая система не отвечает")
+
+    def _request_restart(self, reason: str) -> None:
+        """Перезапустить процесс (сторож поднимет его заново) — когда не будет записи и обработки."""
+        if os.environ.get("AQUA_SUPERVISED") != "1":
+            return
+        from .config import restart_allowed
+        if not restart_allowed():
+            log.warning("Перезапуск (%s) пропущен: недавно уже перезапускались", reason)
+            return
+        self._restart_reason = reason
+
+    def _restart_now(self) -> None:
+        from .config import RESTART_CODE, note_restart
+        log.warning("Перезапускаюсь: %s", self._restart_reason)
+        if self._restart_reason != "по команде":
+            note_restart(self._restart_reason)     # самоперезапуски ограничены, просьбы человека — нет
+        self._restart_reason = ""
+        self.quitting = True
+        self.exit_code = RESTART_CODE
+        self.qapp.exit(RESTART_CODE)
 
     def _refresh_power(self) -> None:
         if perf.refresh_power():
@@ -1035,13 +1278,19 @@ class App(QObject):
         if slept < 20:
             return
         log.info("Компьютер просыпался (сон ~%.0f с) — проверяю устройства", slept)
+        self._after_resume()
+
+    def _after_resume(self) -> None:
+        if time.monotonic() - self._resumed_at < 10:
+            return      # уже починили (сигнал logind и сторож могли сработать оба)
+        self._resumed_at = time.monotonic()
+        self._clock = (time.time(), time.monotonic())
         llm.reset_connections()
         pwaudio.invalidate()
-        perf.detect(force=True)
-        self.bubble.update_frame_rate()
+        # Питание могло смениться за время сна: перечитываем в фоне (powerprofilesctl может тормозить).
+        threading.Thread(target=self._refresh_power, name="power", daemon=True).start()
         if self.rec is not None:
-            if hasattr(self.recorder, "reopen") and not self.recorder.reopen(self.settings.get("audio.input_device")):
-                self.recorder.reopen(None)
+            self.recorder.reopen(self.settings.get("audio.input_device"))
         elif getattr(self.recorder, "warm", False):
             self.recorder.set_warm(False)
             if self.settings.get("audio.keep_mic_warm") and not perf.economy(self.settings):
@@ -1050,6 +1299,33 @@ class App(QObject):
         # тестом, при ошибке он сам перезапустится (и при необходимости уйдёт на процессор).
         self.engine.health_check(lambda ok: None if ok else self.sig_heal_engine.emit("сбой после сна"))
         self.clear_notice("clip")
+
+    @Slot(bool)
+    @guarded
+    def _on_lock(self, locked: bool) -> None:
+        if locked:
+            if self.rec is not None:
+                log.info("Экран заблокирован во время записи — заканчиваю её")
+                self.finish()
+        else:
+            self._sync_keys()
+            QTimer.singleShot(700, self._pump_insert)
+
+    @Slot(bool)
+    @guarded
+    def _on_sleep(self, going: bool) -> None:
+        if going:
+            # Микрофон и соединения сон всё равно сломает — закрываем аккуратно сами.
+            if self.rec is not None:
+                self.finish()
+            if getattr(self.recorder, "warm", False):
+                self.recorder.set_warm(False)
+            llm.reset_connections()
+        else:
+            self._resumed_at = 0.0
+            self._after_resume()
+            if self.settings.get("audio.keep_mic_warm") and not perf.economy(self.settings) and self.rec is None:
+                self.recorder.set_warm(True, self.settings.get("audio.input_device"))
 
     def _restart_listener(self) -> None:
         log.warning("Перезапускаю перехват клавиш")
@@ -1198,25 +1474,22 @@ class App(QObject):
             # После «Отправь» поле ввода пустое — следующей фразе пробел в начале не нужен.
             self._last_insert = None if send else ((sess.window.wm_class, sess.window.title), text,
                                                     time.monotonic())
-            self.insert_text(text, send=send)
+            self.insert_text(text, send=send, window=sess.window)
         elif send:
-            self.insert_text("", send=True)
+            self.insert_text("", send=True, window=sess.window)
         # Пустые записи (тишина, отменённые) в историю не попадают.
         if not self.settings.get("general.privacy_mode", False) and text.strip():
-            audio_path = None
             audio = info.get("audio")
-            if self.settings.get("audio.save_audio", True) and audio is not None and len(audio):
-                try:
-                    audio_path = save_wav(audio)
-                except Exception:  # noqa: BLE001
-                    log.exception("Не удалось сохранить аудио")
+            if not self.settings.get("audio.save_audio", True) or audio is None or not len(audio) \
+                    or self._low_disk:
+                audio = None
             mode = {"edit": "edit"}.get(sess.kind, "hands-free" if sess.mode == "hands_free" else "dictation")
             if sess.ai and sess.kind != "edit":
                 mode += "+ai"
+            # Звук и запись сохраняются в фоне: медленный диск не тормозит облачко.
             self.history.add(text.strip(), raw, sess.window.app, sess.window.title, mode,
                              float(info.get("duration", 0.0)), count_words(text),
-                             float(info.get("latency", 0.0)), audio_path)
-            self.history_changed.emit()
+                             float(info.get("latency", 0.0)), audio)
 
     # ================================================================ вставка
     def paste_last(self) -> None:
@@ -1231,14 +1504,22 @@ class App(QObject):
             return
         self.insert_text(text)
 
-    def insert_text(self, text: str, send: bool = False) -> None:
+    def insert_text(self, text: str, send: bool = False, window: Optional[WindowInfo] = None) -> None:
         """Поставить текст в очередь вставки: по одному, по порядку, без гонок за буфер обмена."""
-        self._outbox.append((text, send))
+        self._outbox.append((text, send, window))
         self._pump_insert()
 
     @guarded
     def _pump_insert(self) -> None:
         if self._insert_busy or not self._outbox:
+            if not self._outbox:
+                self._held_by_lock = False
+            return
+        if self.sysevents.locked:
+            # Экран заблокирован: вставка ушла бы в поле пароля. Ждём разблокировки.
+            if not self._held_by_lock:
+                log.info("Экран заблокирован — вставка отложена до разблокировки")
+            self._held_by_lock = True
             return
         if self.keys.any_modifier():
             # Человек держит Alt (новая диктовка) или Ctrl — Ctrl+V превратился бы в Alt+Ctrl+V.
@@ -1248,7 +1529,7 @@ class App(QObject):
             if self._insert_wait_since is None:
                 self._insert_wait_since = now
             if self.rec is None and not self._act_down and now - self._insert_wait_since > 8:
-                text, _send = self._outbox.popleft()
+                text, _send, _window = self._outbox.popleft()
                 self._insert_wait_since = None
                 self._set_clipboard(text, hide_from_history=False)
                 self.bubble.show_message("Текст в буфере — вставьте Ctrl+V", "warn", 3000)
@@ -1257,9 +1538,19 @@ class App(QObject):
             QTimer.singleShot(25, self._pump_insert)
             return
         self._insert_wait_since = None
-        text, send = self._outbox.popleft()
+        text, send, window = self._outbox.popleft()
+        if self._held_by_lock and text and window is not None and window.wm_class:
+            # Текст ждал разблокировки экрана. Вставляем, только если перед нами то же окно.
+            now_window = self.desktop.active_window()
+            if (now_window.wm_class, now_window.title) != (window.wm_class, window.title):
+                self._set_clipboard(text.strip(), hide_from_history=False)
+                self.bubble.show_message("Текст диктовки в буфере обмена — вставьте Ctrl+V", "info", 4000)
+                QTimer.singleShot(0, self._pump_insert)
+                return
         self._insert_busy = True
         self._insert_started = time.monotonic()
+        # Набор по буквам длинного текста идёт долго — это не зависание.
+        self._insert_limit = 8.0 + (len(text) * 0.03 if self.settings.get("insert.method", "paste") == "type" else 0)
         if not text:
             self._press_send()
             QTimer.singleShot(60, self._insert_done)
@@ -1268,7 +1559,7 @@ class App(QObject):
         if method == "type":
             def work():
                 ok = xdotool_type(text)
-                QTimer.singleShot(0, lambda: self._typed(ok, text, send))
+                self.sig_typed.emit(ok, text, send)
             threading.Thread(target=work, daemon=True).start()
             return
         if method == "clipboard":
@@ -1278,6 +1569,7 @@ class App(QObject):
             return
         self._paste(text, send)
 
+    @Slot(bool, str, bool)
     @guarded
     def _typed(self, ok: bool, text: str, send: bool) -> None:
         if not ok:
@@ -1292,22 +1584,8 @@ class App(QObject):
         self._insert_busy = False
         if self._outbox:
             self._pump_insert()
-        elif self._clip_restore is not None or self._clip_text:
+        elif self._clip_snapped or self._clip_text:
             self._restore_clipboard()
-
-    def _snapshot_clipboard(self) -> Optional[QMimeData]:
-        clip = QGuiApplication.clipboard()
-        md = clip.mimeData(QClipboard.Clipboard)
-        if md is None:
-            return None
-        snap = QMimeData()
-        try:
-            for fmt in md.formats():
-                if fmt.startswith(SAFE_MIME):
-                    snap.setData(fmt, md.data(fmt))
-        except Exception:  # noqa: BLE001
-            return None
-        return snap
 
     def _set_clipboard(self, text: str, hide_from_history: bool) -> None:
         md = QMimeData()
@@ -1320,14 +1598,71 @@ class App(QObject):
     @guarded
     def _paste(self, text: str, send: bool) -> None:
         restore = self.settings.get("insert.restore_clipboard", True)
-        # Снимок буфера — один раз на серию вставок; восстанавливаем после последней.
-        if restore and self._clip_restore is None and not self._clip_text:
-            self._clip_restore = self._snapshot_clipboard()
+        pre = self._prefetched
+        if restore and not self._clip_snapped and pre is not None and pre[1] == self._clip_gen \
+                and time.monotonic() - pre[2] < 30:
+            # Снимок сделан заранее (пока распознавалась фраза), и буфер с тех пор не менялся.
+            self._prefetched = None
+            self._clip_snapped = True
+            self._clip_restore = pre[0]
+        if restore and not self._clip_snapped:
+            # Снимок буфера — один раз на серию вставок (вернём его после последней) и в фоне:
+            # зависшая программа-владелец буфера не должна подвешивать облачко.
+            self._snap_seq += 1
+            seq = self._snap_seq
+            self._snap_pending = (seq, text, send)
+
+            def work():
+                self.sig_snapshot.emit(xclip.snapshot(timeout=0.6), seq)
+            threading.Thread(target=work, name="clipboard", daemon=True).start()
+            QTimer.singleShot(900, lambda: self._on_snapshot(None, seq))
+            return
+        self._paste_now(text, send)
+
+    @Slot(object, int)
+    @guarded
+    def _on_snapshot(self, snap, seq: int) -> None:
+        pending = self._snap_pending
+        if pending is None or pending[0] != seq:
+            return          # уже вставили (снимок опоздал — буфер не вернём, но и не ждём)
+        self._snap_pending = None
+        self._clip_snapped = True
+        self._clip_restore = snap
+        self._paste_now(pending[1], pending[2])
+
+    def _prefetch_clipboard(self) -> None:
+        """Снять буфер заранее (в момент отпускания клавиши): к вставке снимок уже готов."""
+        if not self.settings.get("insert.restore_clipboard", True) or self._clip_snapped or self._prefetching \
+                or self.settings.get("insert.method", "paste") != "paste":
+            return
+        self._prefetching = True
+        gen = self._clip_gen
+
+        def work():
+            self.sig_prefetch.emit(xclip.snapshot(timeout=0.6), gen)
+        threading.Thread(target=work, name="clipboard", daemon=True).start()
+
+    @Slot(object, int)
+    def _on_prefetch(self, snap, gen: int) -> None:
+        self._prefetching = False
+        self._prefetched = (snap, gen, time.monotonic()) if snap is not None and gen == self._clip_gen else None
+
+    def _clip_changed(self) -> None:
+        self._clip_gen += 1
+
+    def _paste_now(self, text: str, send: bool) -> None:
+        restore = self.settings.get("insert.restore_clipboard", True)
         self._clip_text = text if restore else ""
         self._set_clipboard(text, hide_from_history=restore)
 
         def keys():
             window = self.desktop.active_window()
+            if not window.wm_class and not window.title:
+                # Некуда вставлять (окно закрылось, фокус на рабочем столе): текст оставляем
+                # в буфере обмена, старый буфер не возвращаем — иначе текст пропал бы.
+                self._clip_restore, self._clip_text, self._clip_snapped = None, "", False
+                self.bubble.show_message("Некуда вставить — текст в буфере обмена (Ctrl+V)", "info", 3500)
+                return
             mods, key = self.desktop.paste_keys_for(window, self.settings.get("insert.terminal_shift_paste", True))
             if not self.desktop.send_combo(mods, key):
                 self.bubble.show_message("Не удалось вставить — текст в буфере", "warn", 2500)
@@ -1342,14 +1677,18 @@ class App(QObject):
 
     def _restore_clipboard(self) -> None:
         snap, self._clip_restore = self._clip_restore, None
+        self._clip_snapped = False
         ours, self._clip_text = self._clip_text, ""
-        if not ours:
-            return
+        if not ours or snap is None:
+            return          # снимка нет (владелец буфера не ответил) — оставляем наш текст
         clip = QGuiApplication.clipboard()
-        if clip.text(QClipboard.Clipboard) != ours:
-            return  # человек уже скопировал что-то своё
-        if snap is not None and snap.formats():
-            clip.setMimeData(snap, QClipboard.Clipboard)
+        if not clip.ownsClipboard():
+            return          # человек уже скопировал что-то своё (без запроса к чужой программе)
+        if snap:
+            md = QMimeData()
+            for mime, data in snap.items():
+                md.setData(mime, QByteArray(data))
+            clip.setMimeData(md, QClipboard.Clipboard)
         else:
             clip.clear(QClipboard.Clipboard)
 
@@ -1387,9 +1726,18 @@ class App(QObject):
             self.engine.retry_gpu()
             self.clear_notice("engine")
             return
-        if key == "mic":
-            self.clear_notice("mic")
+        if key == "mic" or (key == "mute" and self.notices.get("mute", ("", "", ""))[2] == "Выбрать микрофон"):
+            self.clear_notice(key)
             self.show_window("settings")
+            return
+        if key == "mute":
+            device = self.settings.get("audio.input_device")
+
+            def unmute():
+                ok = pwaudio.unmute(device)
+                self.sig_notice_done.emit("mute", ok, "Микрофон включён." if ok else
+                                          "Не получилось включить микрофон — включите его в настройках звука.")
+            threading.Thread(target=unmute, daemon=True).start()
             return
         if key == "clip":
             device = self.settings.get("audio.input_device")
@@ -1433,6 +1781,10 @@ class App(QObject):
                 QTimer.singleShot(15000, lambda: self.clear_notice("clip"))
         elif key == "vram":
             self.set_notice("vram", "info", message, "")
+        elif key == "mute":
+            self.set_notice("mute", "info" if ok else "error", message, "")
+            if ok:
+                QTimer.singleShot(8000, lambda: self.clear_notice("mute"))
 
     # ================================================================ разное
     def _on_setting(self, key: str, value) -> None:
@@ -1459,6 +1811,13 @@ class App(QObject):
                 self.router.reset_cloud()
                 self.clear_notice("cloud")
             QTimer.singleShot(0, self._maybe_start_llm)
+        elif key in ("general.history_days", "audio.keep_audio_days"):
+            # Срок хранения сократили — удаляем не сразу: вдруг выбрали случайно и вернут обратно.
+            if not hasattr(self, "_purge_later"):
+                self._purge_later = QTimer(self)
+                self._purge_later.setSingleShot(True)
+                self._purge_later.timeout.connect(self._maintenance)
+            self._purge_later.start(60_000)
         elif key == "llm.builtin_backend":
             self.local_llm.stop()
             QTimer.singleShot(0, self._maybe_start_llm)
@@ -1497,12 +1856,15 @@ class App(QObject):
         if self.rec is not None:
             return
         if on and not self._mic_test:
-            try:
-                self.recorder.start(self.settings.get("audio.input_device"), self._mic_sink, preroll_blocks=0)
-                self._mic_test = True
-                self._mic_test_since = time.monotonic()
-            except Exception as exc:  # noqa: BLE001
-                self.status_changed.emit("mic-error", str(exc))
+            self._mic_test = True
+            self._mic_test_since = time.monotonic()
+
+            def result(ok, _fallback, error):
+                if not ok:
+                    self.sig_mic_result.emit(MIC_TEST_SID, False, False, friendly_mic_error(error))
+
+            self.recorder.start(self.settings.get("audio.input_device"), self._mic_sink, preroll_blocks=0,
+                                on_result=result)
         elif not on and self._mic_test:
             self._mic_test = False
             self.recorder.stop(self._mic_sink)
@@ -1539,8 +1901,13 @@ class App(QObject):
         if not row or not row["audio"] or not os.path.exists(row["audio"]):
             callback(None)
             return
+        try:
+            audio = load_wav(row["audio"])
+        except Exception as exc:  # noqa: BLE001 — файл записи повреждён
+            log.warning("Не удалось прочитать запись %s: %s", row["audio"], exc)
+            callback(None)
+            return
         self._retranscribe_callbacks[row_id] = callback
-        audio = load_wav(row["audio"])
         self.engine.transcribe_array(audio, lambda text: self.sig_retranscribed.emit(row_id, text or ""))
 
     @Slot(int, str)
@@ -1549,9 +1916,20 @@ class App(QObject):
         processed = self.processor.process(text, self.settings) if text else ""
         if processed:
             self.history.update_text(row_id, processed, count_words(processed))
-            self.history_changed.emit()
         if callback:
             callback(processed)
+
+
+def one_line(text: str) -> str:
+    """Текст одной строкой (для терминала). Строчная буква после бывшего переноса, если там
+    не кончалось предложение: «первая команда\nВторая команда» → «первая команда вторая команда»."""
+    def join(m):
+        before = text[:m.start()].rstrip()
+        nxt = m.group(1)
+        if before and before[-1] not in ".!?…:":
+            nxt = nxt.lower()
+        return " " + nxt
+    return re.sub(r"\s*\n+\s*(\S)", join, text).strip()
 
 
 def plural_words(n: int) -> str:

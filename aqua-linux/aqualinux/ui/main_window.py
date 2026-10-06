@@ -80,6 +80,7 @@ class Page:
         row.addWidget(column, 100)
         row.addStretch(1)
         self.help = HelpButton()
+        self.subtitle: QLabel | None = None
         if title:
             head = QHBoxLayout()
             texts = QVBoxLayout()
@@ -92,6 +93,7 @@ class Page:
                 s.setObjectName("PageSubtitle")
                 s.setWordWrap(True)
                 texts.addWidget(s)
+                self.subtitle = s
             head.addLayout(texts, 1)
             head.addWidget(self.help, 0, Qt.AlignTop)
             self.lay.addLayout(head)
@@ -117,41 +119,86 @@ def when_text(ts: float) -> str:
     return stamp.strftime("%d.%m, %H:%M")
 
 
+MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
+          "ноября", "декабря")
+WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+
+
+def day_title(day: dt.date) -> str:
+    today = dt.date.today()
+    if day == today:
+        return "Сегодня"
+    if day == today - dt.timedelta(days=1):
+        return "Вчера"
+    text = f"{day.day} {MONTHS[day.month - 1]}, {WEEKDAYS[day.weekday()]}"
+    if day.year != today.year:
+        text = f"{day.day} {MONTHS[day.month - 1]} {day.year}"
+    return text
+
+
+def keep_days_text(days: int) -> str:
+    if not days:
+        return "Хранится только на этом компьютере."
+    if days == 1:
+        period = "сутки"
+    elif days == 7:
+        period = "неделю"
+    elif days == 30:
+        period = "месяц"
+    elif days == 365:
+        period = "год"
+    else:
+        period = f"{days} дн."
+    return f"Хранится на этом компьютере {period} — старые записи удаляются сами."
+
+
 class HistoryItem(QFrame):
-    """Запись истории: время и текст. Кнопки появляются при наведении."""
+    """Запись истории: время и текст. Кнопки появляются при наведении (и создаются только
+    тогда — список из десятков записей строится мгновенно)."""
+
+    LONG = 700   # длинные диктовки в списке показываем свёрнутыми
 
     def __init__(self, window: "MainWindow", row, compact: bool = False):
         super().__init__()
         self.setObjectName("Card")
         self.w = window
         self.row = row
+        self.compact = compact
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 10, 16, 12)
         lay.setSpacing(4)
-        meta = QHBoxLayout()
-        when = QLabel(when_text(row["ts"]))
+        self.meta = QHBoxLayout()
+        when = QLabel(when_text(row["ts"]) if compact else dt.datetime.fromtimestamp(row["ts"]).strftime("%H:%M"))
         when.setObjectName("Muted")
         when.setMinimumHeight(24)
-        meta.addWidget(when, 1)
+        self.meta.addWidget(when, 1)
+        self.actions: QWidget | None = None
+        lay.addLayout(self.meta)
+        text = row["text"] or "(пусто)"
+        limit = 200 if compact else self.LONG
+        self.text = QLabel(text[:limit] + "…" if len(text) > limit else text)
+        self.text.setWordWrap(True)
+        self.text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.text)
+        if not compact and len(text) > limit:
+            more = QPushButton("Показать полностью")
+            more.setObjectName("Link")
+            more.setCursor(Qt.PointingHandCursor)
+            more.clicked.connect(lambda: (self.text.setText(text), more.hide()))
+            lay.addWidget(more, 0, Qt.AlignLeft)
+
+    def _build_actions(self) -> None:
+        row = self.row
         self.actions = QWidget()
         acts = QHBoxLayout(self.actions)
         acts.setContentsMargins(0, 0, 0, 0)
         acts.setSpacing(0)
         self._btn(acts, "Копировать", self._copy)
-        if not compact:
+        if not self.compact:
             if row["audio"] and os.path.exists(row["audio"]):
                 self._btn(acts, "▶ Слушать", lambda: self.w.play(row["audio"]))
             self._btn(acts, "Удалить", self._delete).setStyleSheet(f"color: {self.w.colors['danger']};")
-        self.actions.setVisible(False)
-        meta.addWidget(self.actions)
-        lay.addLayout(meta)
-        text = row["text"] or "(пусто)"
-        if compact and len(text) > 200:
-            text = text[:200] + "…"
-        self.text = QLabel(text)
-        self.text.setWordWrap(True)
-        self.text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.text)
+        self.meta.addWidget(self.actions)
 
     def _btn(self, layout, label: str, slot) -> QPushButton:
         b = QPushButton(label)
@@ -170,14 +217,17 @@ class HistoryItem(QFrame):
 
     def _delete(self) -> None:
         self.w.app.history.delete(self.row["id"])
-        self.w.refresh_history_views()
+        self.w.forget_history_item(self)
 
     def enterEvent(self, e) -> None:  # noqa: N802
+        if self.actions is None:
+            self._build_actions()
         self.actions.setVisible(True)
         super().enterEvent(e)
 
     def leaveEvent(self, e) -> None:  # noqa: N802
-        self.actions.setVisible(False)
+        if self.actions is not None:
+            self.actions.setVisible(False)
         super().leaveEvent(e)
 
 
@@ -316,7 +366,8 @@ class MainWindow(QMainWindow):
         self.nav_buttons[key].setChecked(True)
         self.stack.setCurrentWidget(self.pages[key].area)
         if key in ("home", "history"):
-            self.refresh_history_views()
+            self._history_dirty.add(key)
+            self._apply_history_refresh()
         if key == "settings" and hasattr(self, "mic_combo"):
             self._fill_mics()
         self.show()
@@ -500,6 +551,7 @@ class MainWindow(QMainWindow):
             self.orb.set_level(level)
 
     def _refresh_home(self) -> None:
+        self._history_dirty.discard("home")
         st = self.app.history.stats(int(self.settings.get("general.typing_wpm_baseline", 40)))
         self.stat_words.set(f"{st['words']:,}".replace(",", " "))
         self.stat_saved.set(human_minutes(st["saved_minutes"]))
@@ -516,44 +568,109 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- История
     def _page_history(self) -> Page:
-        pg = Page("История", "Всё, что вы надиктовали. Хранится только на этом компьютере.")
+        pg = Page("История", "Всё, что вы надиктовали. "
+                  + keep_days_text(int(self.settings.get("general.history_days", 7) or 0)))
         self.history_search = QLineEdit()
         self.history_search.setPlaceholderText("Поиск")
         self.history_search.setClearButtonEnabled(True)
-        self.history_search.textChanged.connect(lambda: QTimer.singleShot(150, self._refresh_history))
+        # Поиск — после паузы в наборе, а не на каждую букву.
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(250)
+        self._search_timer.timeout.connect(self._refresh_history)
+        self.history_search.textChanged.connect(lambda: self._search_timer.start())
         pg.lay.addWidget(self.history_search)
-        self.history_holder = QWidget()
-        self.history_list = QVBoxLayout(self.history_holder)
-        self.history_list.setContentsMargins(0, 0, 0, 0)
-        self.history_list.setSpacing(10)
-        pg.lay.addWidget(self.history_holder)
-        pg.lay.addStretch(1)
+        # Список рисует только видимые записи и подгружает следующие при прокрутке:
+        # страница открывается мгновенно при любом размере истории.
+        from ..storage import PAGE
+        from .history_view import HistoryList, HistoryModel
+        self.history_model = HistoryModel(self.app.history, PAGE, day_title)
+        self.history_view = HistoryList(self.history_model)
+        self.history_view.copy_requested.connect(self._copy_history)
+        self.history_view.play_requested.connect(self.play)
+        self.history_view.delete_requested.connect(self._delete_history)
+        self.history_holder = self.history_view
+        self.history_list = self.history_view          # «страница истории построена»
+        self.history_empty = QLabel("")
+        self.history_empty.setObjectName("Muted")
+        self.history_empty.hide()
+        pg.lay.addWidget(self.history_empty)
+        pg.lay.addWidget(self.history_view, 1)
+        # Прокручивается сам список, а не страница целиком.
+        pg.area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._history_dirty: set = {"home", "history"}
+        # Новые диктовки приходят пачками — перерисовываем не чаще раза в 0,3 с и только видимое.
+        self._history_timer = QTimer(self)
+        self._history_timer.setSingleShot(True)
+        self._history_timer.setInterval(300)
+        self._history_timer.timeout.connect(lambda: self._apply_history_refresh(full=False))
         return pg
 
     def refresh_history_views(self) -> None:
+        """История изменилась. Спрятанное окно не перестраиваем — только помечаем."""
         if not hasattr(self, "history_list"):
             return
-        self._refresh_history()
-        self._refresh_home()
+        self._history_dirty.update(("home", "history"))
+        if self.isVisible() and self.current_page() in ("home", "history"):
+            self._history_timer.start()
 
-    def _refresh_history(self) -> None:
-        clear_layout(self.history_list)
-        rows = self.app.history.recent(150, self.history_search.text().strip())
-        if not rows:
-            empty = QLabel("Ничего не найдено." if self.history_search.text() else
-                           "Пока пусто — продиктуйте что-нибудь, и запись появится здесь.")
-            empty.setObjectName("Muted")
-            self.history_list.addWidget(empty)
-        for row in rows:
-            self.history_list.addWidget(HistoryItem(self, row))
+    def _apply_history_refresh(self, full: bool = True) -> None:
+        if not self.isVisible():
+            return      # перестроим при показе окна (showEvent)
+        page = self.current_page()
+        if page in self._history_dirty:
+            self._history_dirty.discard(page)
+            if page == "history":
+                self._refresh_history(full)
+            else:
+                self._refresh_home()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if getattr(self, "_history_dirty", None):
+            QTimer.singleShot(0, self._apply_history_refresh)
+
+    def _refresh_history(self, full: bool = True) -> None:
+        query = self.history_search.text().strip()
+        if not full and not query and not self.history_model.has_new():
+            return      # изменение не добавило записей (удаление, очистка старых) — список не трогаем
+        if self.pages.get("history") and self.pages["history"].subtitle is not None:
+            self.pages["history"].subtitle.setText(
+                "Всё, что вы надиктовали. " + keep_days_text(int(self.settings.get("general.history_days", 7) or 0)))
+        scroll = self.history_view.verticalScrollBar().value()
+        self.history_model.reload(query)
+        self.history_view.verticalScrollBar().setValue(scroll)
+        empty = self.history_model.is_empty()
+        self.history_empty.setText("Ничего не найдено." if query else
+                                   "Пока пусто — продиктуйте что-нибудь, и запись появится здесь.")
+        self.history_empty.setVisible(empty)
+        self.history_view.setVisible(not empty)
+
+    def _copy_history(self, row_id: int) -> None:
+        row = self.app.history.get(row_id)
+        if row is not None:
+            QGuiApplication.clipboard().setText(row["text"])
+
+    def _delete_history(self, row_id: int) -> None:
+        """Удалили запись — убираем строку сразу, без перестройки списка."""
+        self.app.history.delete(row_id)
+        self.history_model.remove_id(row_id)
+        self._history_dirty.add("home")
+
+    def forget_history_item(self, item: "HistoryItem") -> None:
+        """Удалили запись на главной — убираем карточку сразу."""
+        item.hide()
+        item.deleteLater()
+        self._history_dirty.add("history")
 
     def play(self, path: str) -> None:
         from ..storage import load_wav
         try:
-            import sounddevice as sd
-            sd.play(load_wav(path), 16000)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, APP_NAME, f"Не удалось воспроизвести: {exc}")
+            audio = load_wav(path)
+        except Exception as exc:  # noqa: BLE001 — файл удалён или повреждён
+            QMessageBox.warning(self, APP_NAME, f"Не удалось воспроизвести запись: {exc}")
+            return
+        self.app.sounds.play_array(audio, 16000)
 
     # ------------------------------------------------------------- Словарь и замены
     def _table(self, headers: list[str]) -> QTableWidget:
@@ -964,8 +1081,14 @@ class MainWindow(QMainWindow):
         privacy = Section("Приватность и история", "что сохраняется")
         privacy.add_row("Не сохранять историю", "Диктовки нигде не запоминаются.",
                         bind_switch(s, "general.privacy_mode"))
+        days = int(s.get("general.history_days", 7) or 0)
+        options = [(1, "Сутки"), (7, "Неделю"), (30, "Месяц"), (365, "Год"), (0, "Всегда")]
+        if days not in [v for v, _ in options]:
+            options.insert(0, (days, f"{days} дн."))
+        privacy.add_row("Хранить историю", "Старые диктовки удаляются сами — история не разрастается.",
+                        bind_combo(s, "general.history_days", options))
         privacy.add_row("Сохранять запись голоса", "Чтобы прослушать позже.", bind_switch(s, "audio.save_audio"))
-        privacy.add_row("Хранить записи", "", bind_spin(s, "audio.keep_audio_days", 1, 365, " дн."))
+        privacy.add_row("Хранить запись голоса", "", bind_spin(s, "audio.keep_audio_days", 1, 365, " дн."))
         clear = QPushButton("Очистить")
         clear.setObjectName("Danger")
         clear.setCursor(Qt.PointingHandCursor)
@@ -1197,6 +1320,10 @@ class MainWindow(QMainWindow):
                 self.ai_switch.blockSignals(True)
                 self.ai_switch.setChecked(bool(value))
                 self.ai_switch.blockSignals(False)
+            elif key == "general.history_days":
+                self._history_dirty.add("history")
+                if self.isVisible() and self.current_page() == "history":
+                    self._refresh_history()
             elif key == "audio.input_device" and hasattr(self, "mic_combo"):
                 i = self.mic_combo.findData(value)
                 if i >= 0 and i != self.mic_combo.currentIndex():

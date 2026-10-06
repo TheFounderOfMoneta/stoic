@@ -139,7 +139,16 @@ class Bubble(QWidget):
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.setInterval(7)
         self.timer.timeout.connect(self._tick)
+        self._base_interval = 7
         self.apply_targets()
+        # Монитор отключили/подключили, сменился масштаб или док — облачко не должно остаться
+        # за краем несуществующего экрана.
+        app = QGuiApplication.instance()
+        if app is not None:
+            for signal in (app.screenAdded, app.screenRemoved, app.primaryScreenChanged):
+                signal.connect(self._screens_changed)
+            for screen in app.screens():
+                screen.availableGeometryChanged.connect(self._screens_changed)
 
     # ------------------------------------------------------------ публичное API
     def set_state(self, state: str, mode_label: str = "") -> None:
@@ -260,9 +269,26 @@ class Bubble(QWidget):
         """Частота кадров по мощности и питанию: 144 Гц от сети, 60 от батареи, 30 в экономии."""
         try:
             from .. import perf
-            self.timer.setInterval(perf.bubble_interval_ms(self.settings))
+            self._base_interval = perf.bubble_interval_ms(self.settings)
+            self.timer.setInterval(self._base_interval)
         except Exception:  # noqa: BLE001
             pass
+
+    def _screens_changed(self, *_args) -> None:
+        QTimer.singleShot(400, self._after_screens_changed)
+
+    def _after_screens_changed(self) -> None:
+        app = QGuiApplication.instance()
+        if app is not None:
+            for screen in app.screens():
+                try:
+                    screen.availableGeometryChanged.disconnect(self._screens_changed)
+                except (RuntimeError, TypeError):
+                    pass
+                screen.availableGeometryChanged.connect(self._screens_changed)
+        self._input_rect = None          # масштаб мог смениться — зону кликов пересчитать
+        self.reposition()
+        self._kick()
 
     def _kick(self) -> None:
         if self._visible_wanted() and not self.isVisible():
@@ -318,6 +344,11 @@ class Bubble(QWidget):
 
         self._update_input_region()
         self.update()
+        # Долгая загрузка модели (первый запуск, медленный интернет) — крутим значок
+        # с частотой 30 Гц, а не 144: облачко не должно нагружать процессор, пока ждём.
+        interval = 33 if (st == "idle" and self.model_loading) else self._base_interval
+        if self.timer.interval() != interval:
+            self.timer.setInterval(interval)
 
         idle_settled = (st == "idle" and self.w.settled() and self.h.settled() and self.orb < 0.01
                         and self.msg < 0.01 and self.text_alpha < 0.01 and self.chip_alpha < 0.01

@@ -50,6 +50,12 @@ class WindowInfo:
         return f"WindowInfo({self.wm_class!r}, {self.title!r})"
 
 
+def _connection_lost(exc: Exception) -> bool:
+    """Ошибка — это оборванное соединение с X-сервером (а не, скажем, закрытое окно)?"""
+    name = type(exc).__name__
+    return isinstance(exc, (OSError, EOFError)) or "ConnectionClosed" in name or "DisplayConnection" in name
+
+
 class X11Desktop:
     def __init__(self):
         self.dpy = display.Display() if X is not None else None
@@ -64,33 +70,42 @@ class X11Desktop:
     def active_window(self) -> WindowInfo:
         if self.dpy is None:
             return WindowInfo()
-        try:
-            prop = self.root.get_full_property(self.NET_ACTIVE, Xatom.WINDOW)
-            if prop and prop.value and prop.value[0]:
-                win = self.dpy.create_resource_object("window", prop.value[0])
-            else:
-                # Нет _NET_ACTIVE_WINDOW (фокус на рабочем столе, редкие окна, без оконного
-                # менеджера) — берём окно с фокусом клавиатуры и поднимаемся до окна с WM_CLASS.
-                win = self._focus_toplevel()
-                if win is None:
-                    return WindowInfo()
-            wm_class = instance = ""
-            cls = win.get_wm_class()
-            if cls:
-                instance = cls[0] or ""
-                wm_class = cls[1] or cls[0] or ""
-            title = ""
-            name = win.get_full_property(self.NET_NAME, self.UTF8)
-            if name and name.value:
-                title = name.value.decode("utf-8", "replace") if isinstance(name.value, bytes) else str(name.value)
-            else:
-                title = win.get_wm_name() or ""
-            pid_prop = win.get_full_property(self.NET_PID, Xatom.CARDINAL)
-            pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else None
-            return WindowInfo(wm_class, title, pid, instance)
-        except Exception:  # noqa: BLE001
-            log.debug("Не удалось определить активное окно", exc_info=True)
-            return WindowInfo()
+        for attempt in range(2):
+            try:
+                return self._active_window()
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 0 and _connection_lost(exc):
+                    log.warning("Соединение с X-сервером оборвалось — переподключаюсь")
+                    self.reconnect()
+                    continue
+                log.debug("Не удалось определить активное окно", exc_info=True)
+                return WindowInfo()
+        return WindowInfo()
+
+    def _active_window(self) -> WindowInfo:
+        prop = self.root.get_full_property(self.NET_ACTIVE, Xatom.WINDOW)
+        if prop and prop.value and prop.value[0]:
+            win = self.dpy.create_resource_object("window", prop.value[0])
+        else:
+            # Нет _NET_ACTIVE_WINDOW (фокус на рабочем столе, редкие окна, без оконного
+            # менеджера) — берём окно с фокусом клавиатуры и поднимаемся до окна с WM_CLASS.
+            win = self._focus_toplevel()
+            if win is None:
+                return WindowInfo()
+        wm_class = instance = ""
+        cls = win.get_wm_class()
+        if cls:
+            instance = cls[0] or ""
+            wm_class = cls[1] or cls[0] or ""
+        title = ""
+        name = win.get_full_property(self.NET_NAME, self.UTF8)
+        if name and name.value:
+            title = name.value.decode("utf-8", "replace") if isinstance(name.value, bytes) else str(name.value)
+        else:
+            title = win.get_wm_name() or ""
+        pid_prop = win.get_full_property(self.NET_PID, Xatom.CARDINAL)
+        pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else None
+        return WindowInfo(wm_class, title, pid, instance)
 
     def _focus_toplevel(self):
         focus = self.dpy.get_input_focus().focus
@@ -163,9 +178,17 @@ class X11Desktop:
         return 0
 
     def tap_keycode(self, code: int) -> None:
-        xtest.fake_input(self.dpy, X.KeyPress, code)
-        xtest.fake_input(self.dpy, X.KeyRelease, code)
-        self.dpy.sync()
+        for attempt in range(2):
+            try:
+                xtest.fake_input(self.dpy, X.KeyPress, code)
+                xtest.fake_input(self.dpy, X.KeyRelease, code)
+                self.dpy.sync()
+                return
+            except Exception as exc:  # noqa: BLE001
+                if attempt or not _connection_lost(exc):
+                    log.debug("Не удалось нажать keycode %s", code, exc_info=True)
+                    return
+                self.reconnect()
 
     def release_modifiers(self, names: list[str]) -> None:
         """Отпустить модификаторы, которые человек ещё держит (иначе Ctrl+V станет Super+Ctrl+V)."""
