@@ -131,6 +131,18 @@ def test_toggle_off_reaction_is_forgotten(tmp_path):
     assert collect_signals(st)[aid].contribs == []
 
 
+def test_skipped_search_result_is_not_a_dislike(tmp_path):
+    """Пропуск в ленте — слабый минус; пропуск в результатах поиска — не сигнал вовсе."""
+    st = _store(tmp_path)
+    feed_aid = st.add_article(_article(1))
+    search_aid = st.add_article(_article(2))
+    st.log_impression(feed_aid, 0, 3000)
+    st.log_impression(search_aid, 0, 3000, surface="search")
+    sig = collect_signals(st)
+    assert sig[feed_aid].implicit.get("skipped")
+    assert search_aid not in sig or not sig[search_aid].contribs
+
+
 def test_purge_keeps_what_was_learned(tmp_path):
     st = _store(tmp_path)
     old = time.time() - 40 * 86400

@@ -154,11 +154,23 @@ _DATE_LINE = re.compile(r"^(updated|published|posted|обновлено|опуб
                         r"\d[\d.\-/:, ]*(am|pm|gmt|utc|msk)?[\s+\-\d:]*$", re.I)
 
 
+_FOOTER = re.compile(r"copyright|©|all rights reserved|все права защищены|права защищены", re.I)
+
+
 def clean_blocks(blocks: list[dict]) -> list[dict]:
-    """Служебный мусор сайта: строки-даты и короткие ярлыки рубрик перед началом текста."""
-    out = [b for b in blocks if not (b["type"] == "p" and _DATE_LINE.match(b["text"].strip()))]
+    """Служебный мусор сайта: строки-даты, ярлыки рубрик и подписи перед началом текста,
+    шаблоны страницы ({{...}}) и подвал после строки с копирайтом."""
+    out = [b for b in blocks if not (b["type"] == "p" and _DATE_LINE.match(b["text"].strip()))
+           and "{{" not in b["text"]]
+    start = int(len(out) * 0.6)
+    for i in range(start, len(out)):
+        b = out[i]
+        if b["type"] == "p" and words_count(b["text"]) < 25 and _FOOTER.search(b["text"]):
+            out = out[:i]
+            break
+    # До первого настоящего абзаца (≥12 слов) короткие строки — рубрики, подписи к фото, авторы, даты.
     first_real = next((i for i, b in enumerate(out) if b["type"] == "p" and words_count(b["text"]) >= 12), 0)
-    head = [b for b in out[:first_real] if not (b["type"] == "p" and words_count(b["text"]) <= 3)]
+    head = [b for b in out[:first_real] if not (b["type"] == "p" and words_count(b["text"]) < 12)]
     return head + out[first_real:]
 
 

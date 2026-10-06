@@ -86,3 +86,24 @@ def remove() -> None:
 def next_run() -> str:
     ok, out = _systemctl("list-timers", TIMER, "--no-legend")
     return out.split("  ")[0].strip() if ok and out else ""
+
+
+def ensure(times: list[str], enabled: bool) -> tuple[bool, str]:
+    """Самопочинка: поставить/обновить таймер, только если он отличается от нужного.
+
+    (True, "") — всё в порядке или systemd недоступен (тогда сбор догоняет само окно)."""
+    if not shutil.which("systemctl"):
+        return True, ""
+    service, timer = UNIT_DIR / SERVICE, UNIT_DIR / TIMER
+    same = (service.exists() and timer.exists()
+            and service.read_text(encoding="utf-8") == service_text()
+            and timer.read_text(encoding="utf-8") == timer_text(times))
+    if not enabled:
+        if timer.exists():
+            return _systemctl("disable", "--now", TIMER)
+        return True, ""
+    if same:
+        active, _ = _systemctl("is-enabled", TIMER)
+        if active:
+            return True, ""
+    return install(times, enable=True)

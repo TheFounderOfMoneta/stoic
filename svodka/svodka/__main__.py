@@ -1,6 +1,6 @@
 """Точка входа: python -m svodka [команда].
 
-  (без команды) / gui      — окно приложения
+  (без команды) / gui      — окно приложения (--background — свёрнутым в значок панели)
   collect [--force]        — сбор сейчас (--scheduled — запуск от таймера)
   search "запрос"          — поиск в интернете с Claude
   translate ID             — перевести статью
@@ -40,7 +40,8 @@ def gui_running() -> bool:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="svodka", description="Сводка — личный поисковик новостей")
     sub = parser.add_subparsers(dest="cmd")
-    sub.add_parser("gui")
+    g = sub.add_parser("gui")
+    g.add_argument("--background", action="store_true", help="запуск в значке панели (автозапуск)")
     c = sub.add_parser("collect")
     c.add_argument("--force", action="store_true")
     c.add_argument("--scheduled", action="store_true")
@@ -58,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd in (None, "gui"):
         from .app import main as gui_main
-        return gui_main()
+        return gui_main(["--background"] if getattr(args, "background", False) else [])
     if args.cmd == "mcp":
         from .mcp_server import main as mcp_main
         mcp_main()

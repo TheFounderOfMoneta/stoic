@@ -38,6 +38,7 @@ class Item:
     raw: dict = field(default_factory=dict)       # части до нормировки (для объяснений)
     reasons: list = field(default_factory=list)
     explore: bool = False
+    novel_topic: bool = False      # разведка за пределами названных вами тем (значок в ленте)
     randomized: bool = False
 
     @property
@@ -107,6 +108,8 @@ class Ranker:
             self.weights, self.mix_report = learn_mix(storage, self.model.signals, self.weights, now=self.now)
         self.draw = self.model.draw(day_rng("feed", self.now))
         self.rules = storage.active_rules()
+        # Темы, которые вы назвали сами, — не «разведка», даже пока по ним мало данных.
+        self.declared = {t["name"] for t in storage.topics()}
         self.followed_stories = {r["story_key"] for r in storage.query(
             "SELECT story_key FROM articles WHERE followed=1 AND story_key != '' AND collected_at >= ?",
             (self.now - 14 * 86400,))}
@@ -151,6 +154,10 @@ class Ranker:
             novelty_cut = 0.3 if a.get("bucket") == "explore" else 0.5
             item.explore = bool(self.personalization and p.novelty >= novelty_cut) or \
                 (not self.personalization and a.get("bucket") == "explore")
+            # Значок «Разведка» — только для тем, которых вы не называли (по своим темам это просто
+            # «пока мало знаем»). На ранжирование это не влияет: симуляция показала, что так лента
+            # лучше находит новые интересы и быстрее перестраивается.
+            item.novel_topic = item.explore and a.get("topic") not in self.declared
             item.reasons = self.reasons(item)
             items.append(item)
         return items
@@ -191,7 +198,8 @@ class Ranker:
                 elif t == "len":
                     out.append("длинные тексты вам заходят" if v == "long" else "короткие тексты вам заходят")
         if item.explore:
-            out.append("разведка: новое для вас — оцените")
+            out.append("разведка: новое для вас — оцените" if item.novel_topic
+                       else "пока мало знаем, как вам такое — оцените")
         if raw.get("fit", 0) >= 0.75 and len(out) < 3:
             out.append("совпадает с вашим профилем")
         if raw.get("importance", 0) >= 0.75 and len(out) < 3:

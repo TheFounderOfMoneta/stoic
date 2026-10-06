@@ -124,7 +124,9 @@ def collect_signals(storage, until: float | None = None, weights: dict | None = 
     # --- показы ---------------------------------------------------------------
     shown_days: dict[int, set] = {}
     last_imp: dict[int, float] = {}
-    for r in storage.query(f"SELECT article_id, ts, position, visible_ms FROM impressions {cond}", params):
+    # Показы — только из ленты: в поиске человек ищет конкретное, и пропуск там не значит «неинтересно».
+    cond_i = cond + (" AND" if cond else "WHERE") + " surface = 'feed'"
+    for r in storage.query(f"SELECT article_id, ts, position, visible_ms FROM impressions {cond_i}", params):
         s = get(r["article_id"])
         if r["visible_ms"] >= 1000:
             s.shown = True

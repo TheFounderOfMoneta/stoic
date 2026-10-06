@@ -172,6 +172,25 @@ def test_extract_detects_paywall_and_captcha():
         assert extract.read_article(site.url("/missing.html")).status == "failed"
 
 
+def test_clean_blocks_drops_site_boilerplate():
+    """Как на реальной странице CGTN: рубрика, даты, источник, подпись к фото — до текста;
+    шаблоны и подвал с копирайтом — после."""
+    body = "Chinese Premier Li Qiang on Monday chaired a State Council executive meeting to discuss work on " \
+           "macro policies and investment."
+    blocks = [{"type": "p", "text": t} for t in (
+        "Business", "2026.09.29 14:15 GMT+8", "Updated 2026.09.29 14:15 GMT+8", "CGTN",
+        "A view shows the urban landscape of Beijing, China./ VCG", body, body, body, body, body,
+        "(With input from Xinhua)", "Copyright ©", "{{#contents.0.videos}}{{/contents.0.videos}}",
+        "Copyright © 2024 CGTN. 京ICP备20000184号", "互联网新闻信息许可证10120180008")]
+    out = [b["text"] for b in extract.clean_blocks(blocks)]
+    assert out == [body] * 5 + ["(With input from Xinhua)"]
+    # подзаголовок-лид из длинной фразы и заголовки разделов остаются
+    lead = {"type": "p", "text": "A long standfirst explaining what the article is about in more than twelve words "
+                                 "for readers."}
+    h2 = {"type": "h2", "text": "Why"}
+    assert extract.clean_blocks([lead, h2, {"type": "p", "text": body}])[:2] == [lead, h2]
+
+
 # ---------------------------------------------------------------- Google Takeout
 def test_takeout_import(env, tmp_path, monkeypatch):
     settings, storage, _db = env

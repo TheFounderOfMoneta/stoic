@@ -56,6 +56,11 @@ if MODE == "slow":
     time.sleep(30)
 
 system_file = opt("--system-prompt-file", "") or ""
+if system_file.endswith("ask.md"):
+    data = json.loads(sys.stdin.read() or "{}")
+    result("Ответ по статье: " + data.get("вопрос", ""))
+    sys.exit(0)
+
 if system_file.endswith("translate.md"):
     data = json.loads(sys.stdin.read() or "{}")
     blocks = data.get("блоки") or []
