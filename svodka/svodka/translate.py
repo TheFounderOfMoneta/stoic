@@ -174,6 +174,7 @@ def _translate(settings, storage, article_id, on_block, on_progress, cancel) -> 
                 for line in (res.text or "").splitlines():    # на случай, если поток не пришёл
                     parser._line(line)
             except claude_cli.ClaudeError as exc:
+                log.warning("перевод статьи %s: %s — %s", article_id, exc.kind, exc.message[:300])
                 error = exc
                 break
         todo = [b for b in todo if not b.get("_done")]
@@ -193,13 +194,19 @@ def prefetch(settings, storage, n: int, on_progress: Callable[[str], None] | Non
     from .rank.ranker import Ranker
     feed = Ranker(storage, settings).build()
     candidates = [it.article for it in feed.main + feed.more if needs_translation(it.article)][:n]
-    count = 0
+    count = failures = 0
     for a in candidates:
         if on_progress:
             on_progress(f"Перевожу заранее: {a.get('title_ru', '')[:60]}")
         res = translate_article(settings, storage, a["id"])
-        if res.get("error_kind") in ("limit", "auth", "not_installed"):
-            break
         if res["status"] == "done":
             count += 1
+            failures = 0
+            continue
+        log.warning("перевод заранее, статья %s: %s — %s", a["id"], res["status"], res.get("message", ""))
+        failures += 1
+        # Лимит или вход — дальше бессмысленно; две неудачи подряд — тоже стоп: перевод заранее
+        # необязателен, а лимит подписки нужнее для сбора. Остальное переведётся при открытии.
+        if res.get("error_kind") in ("limit", "auth", "not_installed") or failures >= 2:
+            break
     return count

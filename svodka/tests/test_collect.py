@@ -157,6 +157,26 @@ def test_translation_rejects_garbage(env, monkeypatch):
     assert not any(b["text_ru"] for b in storage.blocks(aid) if b["type"] == "p")
 
 
+def test_prefetch_stops_on_limit_and_repeated_failures(env, monkeypatch):
+    """Перевод заранее не должен выжигать лимит подписки: лимит — сразу стоп, иначе — после двух неудач."""
+    settings, storage, _db = env
+    calls = []
+
+    def fake_translate(_s, _st, aid, **_k):
+        calls.append(aid)
+        return {"status": "failed", "message": "не вышло", "error_kind": kind}
+    monkeypatch.setattr(translate, "translate_article", fake_translate)
+    for i in range(5):
+        aid = storage.add_article({"url": f"https://t.example/p{i}", "title_ru": f"Статья {i}", "lang": "en",
+                                   "extract_status": "ok", "topic": "ИИ: развитие", "summary_ru": ["ф"]})
+        storage.set_blocks(aid, [{"type": "p", "text": "Some text"}])
+    kind = "limit"
+    assert translate.prefetch(settings, storage, 5) == 0 and len(calls) == 1
+    calls.clear()
+    kind = "failed"
+    assert translate.prefetch(settings, storage, 5) == 0 and len(calls) == 2
+
+
 def test_translation_check_numbers():
     assert translate.check_block("In 2026, 37 percent", "В 2026 году 37 процентов")
     assert not translate.check_block("In 2026, 37 percent", "В этом году треть")
@@ -219,3 +239,18 @@ def test_takeout_import(env, tmp_path, monkeypatch):
     assert priors["entity:anthropic"][0] > 0 and priors["entity:спорт"][1] > 0
     assert storage.proposed_profile()["text"].startswith("Интересуется")
     assert "Регулирование ИИ" in storage.meta_get("topic_suggestions")
+
+
+# ---------------------------------------------------------------- поиск
+def test_search_finds_abbreviations_and_heals_old_index(env):
+    """«ИИ» стеммер превращал в «и» — такой запрос ничего не находил. Старый индекс перестраивается сам."""
+    _settings, storage, _db = env
+    aid = storage.add_article({"url": "https://s.example/1", "title_ru": "США вводят правила для ИИ-компаний",
+                               "summary_ru": ["Регулирование нейросетей"], "lang": "ru"})
+    storage.index_article(aid, "сша ввод правил для и компан")          # как индексировала старая версия
+    storage.meta_set("search_index_version", "1")
+    assert search.ensure_index(storage) == 1
+    assert search.ensure_index(storage) == 0                              # второй раз — ничего не делает
+    for q in ("ИИ", "сша", "нейросети", "компании"):
+        found = search.search(storage, q)
+        assert found and found[0]["article"]["id"] == aid, q

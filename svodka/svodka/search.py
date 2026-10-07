@@ -20,11 +20,15 @@ _WORD = re.compile(r"[0-9A-Za-zА-Яа-яЁё][0-9A-Za-zА-Яа-яЁё\-+.#]*")
 _CYR = re.compile(r"[А-Яа-яЁё]")
 
 
+INDEX_VERSION = "2"      # меняется, когда меняется разбор слов — тогда индекс перестраивается сам
+
+
 def stem(word: str) -> str:
     w = word.lower().replace("ё", "е").strip("-.")
     if not w:
         return ""
-    if _RU is None:
+    # Короткие слова — чаще всего аббревиатуры (ИИ, США, ЕС, AI): стеммер их портит («ии» → «и»).
+    if _RU is None or len(w) <= 3:
         return w
     return _RU.stemWord(w) if _CYR.search(w) else _EN.stemWord(w)
 
@@ -42,6 +46,17 @@ def index_text(article: dict, blocks: list[dict]) -> str:
     return " ".join(stems(" ".join(parts)))
 
 
+def ensure_index(storage) -> int:
+    """Перестроить индекс, если он построен старой версией разбора слов. Возвращает число статей."""
+    if storage.meta_get("search_index_version", "") == INDEX_VERSION:
+        return 0
+    ids = [r["id"] for r in storage.query("SELECT id FROM articles WHERE purged=0")]
+    for aid in ids:
+        reindex(storage, aid)
+    storage.meta_set("search_index_version", INDEX_VERSION)
+    return len(ids)
+
+
 def reindex(storage, article_id: int) -> None:
     a = storage.article(article_id)
     if not a:
@@ -56,11 +71,11 @@ def _fts_query(query: str) -> str:
 
 def search(storage, query: str, limit: int = 30, ranker=None) -> list[dict]:
     """Статьи по запросу: [{article, snippet, score}]."""
-    q = _fts_query(query)
-    if not q:
+    if not query.strip():
         return []
+    q = _fts_query(query)
     rows = []
-    if storage.fts_ok:
+    if storage.fts_ok and q:
         try:
             rows = storage.query("SELECT rowid, bm25(fts) AS rank FROM fts WHERE fts MATCH ? ORDER BY rank LIMIT 200",
                                  (q,))

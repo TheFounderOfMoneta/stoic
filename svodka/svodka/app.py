@@ -186,6 +186,8 @@ class Controller(QObject):
             self.window.show()
         self.refresh_feed()
         self.update_status()
+        from . import search as libsearch
+        self.spawn(lambda: libsearch.ensure_index(self.storage))       # самопочинка поискового индекса
         if self.services:
             self.check_claude(quiet=True)
             self.spawn(self._ensure_timer)

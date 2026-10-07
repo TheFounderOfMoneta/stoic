@@ -2,7 +2,11 @@
 
 Личный поисковик новостей для Ubuntu. Утром и вечером Claude (по вашей подписке Pro, через Claude Code) ищет свежее по вашим темам, читает статьи и отбирает лучшее. «Сводка» складывает это в ленту, подстраивает порядок под вас, как рекомендации YouTube, и даёт читать статьи целиком по-русски.
 
-![Лента](docs/mockups/01-feed.png)
+| Лента | Читалка |
+|---|---|
+| ![Лента](docs/screenshots/feed.png) | ![Читалка](docs/screenshots/reader.png) |
+
+Скриншоты сняты с настоящего сбора: Claude нашёл, прочитал и перевёл эти статьи. Ещё: [поиск](docs/screenshots/search.png), [настройки](docs/screenshots/settings.png), [«Почему здесь»](docs/screenshots/explain.png), [мастер первого запуска](docs/screenshots/welcome.png).
 
 ## Установка
 
