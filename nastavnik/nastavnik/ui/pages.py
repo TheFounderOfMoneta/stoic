@@ -415,6 +415,13 @@ class SettingsPage(Page):
         g.add_row("Модель", "Sonnet — быстро и бережёт лимиты; Opus — глубже",
                   W.bind_combo(s, "claude.model", [("sonnet", "Sonnet"), ("opus", "Opus"), ("haiku", "Haiku")]))
         self.body.addWidget(g)
+        g = W.Group("Повторение")
+        g.add_row("Ответы проверяет Claude", "Пишете ответ — Claude сам ставит оценку и коротко объясняет. "
+                                             "Выключите, чтобы оценивать самим (без Claude, не тратит лимиты)",
+                  W.bind_switch(s, "review.ai_check"))
+        g.add_row("Модель для проверки", "Haiku — ответ за несколько секунд; Sonnet — точнее, но дольше",
+                  W.bind_combo(s, "claude.review_model", [("haiku", "Haiku"), ("sonnet", "Sonnet"), ("opus", "Opus")]))
+        self.body.addWidget(g)
         g = W.Group("Разговор")
         g.add_row("Хранить переписку", "По умолчанию разговор удаляется после завершения — и у вас, и в журнале "
                                        "Claude Code", W.bind_switch(s, "talk.keep_transcripts"))

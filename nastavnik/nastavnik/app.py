@@ -604,9 +604,20 @@ class Controller(QObject):
         return sid
 
     def review_grade(self, item_id: int, grade: int, latency_ms: int, session_id: int | None,
-                     ahead: bool = False) -> None:
-        engine.record_review(self.storage, self.settings, item_id, grade, latency_ms=latency_ms,
-                             session_id=session_id, ahead=ahead)
+                     ahead: bool = False, note: str = "") -> dict:
+        return engine.record_review(self.storage, self.settings, item_id, grade, latency_ms=latency_ms,
+                                    session_id=session_id, ahead=ahead, note=note)
+
+    def review_check(self, item: dict, answer: str, seconds: float, png: bytes | None, done, fail) -> None:
+        """Claude проверяет ответ на карточку в фоне; done({'grade', 'explanation'}) / fail(ClaudeError)."""
+        from . import review_check
+
+        def failed(exc: Exception) -> None:
+            if isinstance(exc, claude_cli.ClaudeError) and exc.kind in ("auth", "not_installed", "limit"):
+                self._claude_failed(exc.kind, exc.message)
+            fail(exc)
+        self.spawn(lambda: review_check.check_answer(self.settings, item, answer, seconds, png, cancel=self._cancel),
+                   done, failed)
 
     def end_review_session(self) -> None:
         if self.active_kind == "review":

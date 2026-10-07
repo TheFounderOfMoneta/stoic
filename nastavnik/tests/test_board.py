@@ -347,10 +347,10 @@ def test_schema_card_is_drawn_on_board_and_compared(gui):
     assert page.current["id"] == iid and page.draw_btn.isVisible()
     page.draw_btn.click()
     pump(0.1)
-    assert page.board.isVisible() and not page.attempt.isVisible() and not page.reveal_btn.isVisible()
+    assert page.board.isVisible() and not page.attempt.isVisible() and not page.check_btn.isVisible()
     assert page.board.mermaid_btn.text().startswith("Схема текстом")
     cv = page.board.canvas
-    QTest.keyClick(cv, Qt.Key_2)                                   # «2» — инструмент доски, а не оценка
+    QTest.keyClick(cv, Qt.Key_2)                                   # «2» — инструмент доски
     assert cv.tool == "select" and page.current["id"] == iid and not page.revealed
     QTest.keyClick(cv, Qt.Key_1)
     rng = random.Random(6)
@@ -361,18 +361,22 @@ def test_schema_card_is_drawn_on_board_and_compared(gui):
     draw(cv, line((150, 70), (360, 74), rng))
     pump(0.9)
     c.window.grab().save(str(SHOTS / "board-review-dark.png"))
-    find_button(page.board, "Готово — показать ответ").click()
+    find_button(page.board, "Готово — проверить").click()
     pump(0.2)
-    assert page.revealed and page.grades.isVisible() and not page.board.isVisible()
-    views = page.schemas.findChildren(SchemaView)
-    assert len(views) == 2                                          # ваша схема и эталон — обе картинками
-    assert "ВАША СХЕМА · 2 УЗЛА, 1 СТРЕЛКА" in texts(page.schemas) and "ЭТАЛОН" in texts(page.schemas)
-    assert not page.answer.isVisible()                              # эталон-схема вместо текста Mermaid
+    assert page.revealed and not page.board.isVisible() and not page.grades.isVisible()
+    views = page.mine.findChildren(SchemaView) + page.ref.findChildren(SchemaView)
+    assert len(views) == 2                                          # твоя схема и эталон — обе картинками
+    assert "ТВОЯ СХЕМА · 2 УЗЛА, 1 СТРЕЛКА" in texts(page.mine) and "ЭТАЛОН" in texts(page.ref)
     rows = st.boards(item_id=iid)
     assert rows and rows[0]["sent"] == 1 and rows[0]["data"]["shapes"]
-    QTest.keyClick(page.grade_buttons[fsrs.GOOD], Qt.Key_3)         # оценки снова на клавишах
-    pump(0.2)
+    # Claude получил схему в Mermaid и сам поставил оценку
+    assert wait(lambda: "Верно" in page.verdict_title.text())
+    assert "Связей на схеме: 1" in page.verdict_text.text()
+    a = [x for x in st.attempts() if x["item_id"] == iid][-1]
+    assert a["grade"] == 3 and a["note"].startswith("Claude: ")
     assert st.item(iid)["reps"] == 2
+    QTest.keyClick(page.next_btn, Qt.Key_Return)
+    pump(0.2)
 
 
 # ---------------------------------------------------------------- PRIMARY: щелчок не выделяет

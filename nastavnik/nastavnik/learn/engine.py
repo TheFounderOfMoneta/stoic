@@ -51,7 +51,8 @@ def is_delayed_test(storage, item: dict, ts: float) -> bool:
 
 
 def record_review(storage, settings, item_id: int, grade: int, latency_ms: int = 0, confidence: int | None = None,
-                  session_id: int | None = None, ts: float | None = None, ahead: bool = False) -> dict:
+                  session_id: int | None = None, ts: float | None = None, ahead: bool = False,
+                  note: str = "") -> dict:
     """Ответ на карточку в Повторении. Возвращает новое состояние карточки и фазу.
 
     ahead — повторяете сами, раньше срока. FSRS учитывает и такое повторение (вспоминать сразу легче,
@@ -71,7 +72,7 @@ def record_review(storage, settings, item_id: int, grade: int, latency_ms: int =
     storage.log_attempt(phase, grade >= fsrs.HARD, grade=grade, session_id=session_id, topic_id=item["topic_id"],
                         concept_id=item["concept_id"], item_id=item_id, latency_ms=latency_ms,
                         confidence=confidence, elapsed_days=new["elapsed_days"],
-                        retrievability=new["retrievability"], ts=ts)
+                        retrievability=new["retrievability"], ts=ts, note=note)
     if delayed:
         concept = storage.concept(item["concept_id"])
         intro = storage.session(concept["intro_session"]) if concept and concept.get("intro_session") else None

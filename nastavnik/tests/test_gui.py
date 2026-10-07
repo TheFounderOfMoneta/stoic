@@ -239,38 +239,122 @@ def test_new_conversation_note_after_context_limit(gui, monkeypatch):
 
 
 # ---------------------------------------------------------------- повторение
-def test_review_with_keyboard_updates_memory(gui):
-    c, st, _ = gui
-    tid = topic_with_map(c)
+def review_items(st, tid, n=3, answer="Порция данных с адресом получателя", due_ago=60):
     concept = st.concept_by_slug(tid, "c0")
     engine.introduce_concept(st, concept["id"], None, ts=time.time() - 5 * 86400)
     ids = []
-    for i in range(3):
-        iid = st.add_item(tid, concept["id"], f"Вопрос {i}: что такое пакет?", "Порция данных с адресом")
-        st.update_item(iid, due=time.time() - 60, reps=1, stability=3.0, difficulty=5.0,
+    for i in range(n):
+        iid = st.add_item(tid, concept["id"], f"Вопрос {i}: что такое пакет?", answer)
+        st.update_item(iid, due=time.time() - due_ago, reps=1, stability=3.0, difficulty=5.0,
                        last_review=time.time() - 4 * 86400, state="review")
         ids.append(iid)
+    return ids
+
+
+def answer_card(page, text: str) -> None:
+    page.attempt.setPlainText(text)
+    QTest.keyClick(page.attempt, Qt.Key_Return)              # Enter — отдать ответ на проверку
+
+
+def test_review_answers_are_checked_by_claude(gui):
+    """Человек пишет ответ — Claude ставит оценку и объясняет; оценка сразу в FSRS."""
+    c, st, _ = gui
+    tid = topic_with_map(c)
+    ids = review_items(st, tid)
     c.window.open_page("review")
     page = c.window.review_page
     pump()
     assert page.card.isVisible() and "Вопрос" in page.question.text()
     assert "ПРОВЕРКА" in page.meta.text()                    # первое повторение понятия — отложенный тест
-    c.window.grab().save(str(SHOTS / "review-dark.png"))
-    for k in range(3):
+    assert not page.grades.isVisible()                       # оценку себе не ставят
+    for k, text in enumerate(("порция данных с адресом получателя", "кусок данных", "не знаю, что-то про сеть")):
         time.sleep(0.15)
-        page.attempt.setText("порция данных")
-        QTest.keyClick(page.attempt, Qt.Key_Return)          # Enter в поле — показать ответ
+        answer_card(page, text)
+        assert page.state == "checked" and "ЭТАЛОН" in texts(page.card) and text in texts(page.card)
+        assert wait(lambda: page.verdict_title.text() and "проверяет" not in page.verdict_title.text())
+        if k == 0:
+            assert "Верно" in page.verdict_title.text() and "вернётся" in page.verdict_title.text()
+            assert not page.feed.isVisible()                  # вердикт на карточке, в «Проверено» — после ухода
+        if k == 1:
+            c.window.grab().save(str(SHOTS / "review-verdict-dark.png"))
+        QTest.keyClick(page.next_btn, Qt.Key_Return)          # Enter — дальше
         pump(0.05)
-        assert page.answer.isVisible() and page.grade_hints[fsrs.GOOD].text()
-        QTest.keyClick(page.grade_buttons[fsrs.GOOD], Qt.Key_3)
-        pump(0.05)
-    assert "На сегодня всё" in page.empty.text()
     tries = [a for a in st.attempts() if a["item_id"] in ids]
-    assert len(tries) == 3 and all(a["phase"] == "delayed" for a in tries)   # первая проверка каждой карточки
-    assert all(a["latency_ms"] >= 100 for a in tries)
-    assert all(st.item(i)["due"] > time.time() + 86400 for i in ids)
+    assert [a["grade"] for a in tries[:3]] == [4, 2, 1]
+    assert texts(page.feed).count("Вопрос") == 3
+    assert all(a["phase"] == "delayed" and a["note"].startswith("Claude: ") for a in tries[:3])
+    assert all(a["latency_ms"] >= 100 for a in tries[:3])
+    assert st.item(ids[0])["due"] > time.time() + 86400
+    # «не вспомнил» — карточка вернулась в конец этой же очереди
+    assert page.current is not None and page.current["id"] == ids[2]
+    page.dunno()
+    assert page.state == "checked" and "Не вспомнил" in page.verdict_title.text()
+    QTest.keyClick(page.next_btn, Qt.Key_Return)
+    pump(0.05)
+    assert page.current["id"] == ids[2]                       # и ещё раз — пока не вспомнит
+    answer_card(page, "порция данных с адресом получателя")
+    assert wait(lambda: "Верно" in page.verdict_title.text()), (page.state, page.verdict_title.text(), page.verdict_text.text())
+    page.next_card()
+    assert wait(lambda: "На сегодня всё" in page.empty.text())
     review = st.sessions(kind="review")[-1]
     assert review["ended"] and review["active_ms"] >= 0
+
+
+def test_moving_on_before_verdict_still_grades(gui, monkeypatch):
+    """Claude проверяет 1,5 с, а человек сразу жмёт «Дальше» — оценка всё равно встаёт, вердикт — в «Проверено»."""
+    c, st, _ = gui
+    monkeypatch.setenv("FAKE_CHECK_MS", "1500")
+    tid = topic_with_map(c)
+    ids = review_items(st, tid, n=2)
+    c.window.open_page("review")
+    page = c.window.review_page
+    pump()
+    answer_card(page, "порция данных с адресом получателя")
+    assert "проверяет" in page.verdict_title.text()
+    page.next_card()
+    assert page.current["id"] == ids[1] and page.state == "answer"
+    assert wait(lambda: page.feed.isVisible() and "Верно" in texts(page.feed), timeout=20)
+    assert st.item(ids[0])["reps"] == 2 and page.state == "answer"       # текущая карточка не тронута
+    answer_card(page, "порция данных с адресом получателя")
+    page.next_card()
+    assert "дописывает" in page.empty.text()
+    assert wait(lambda: "На сегодня всё" in page.empty.text(), timeout=20)
+
+
+def test_claude_unavailable_means_grading_yourself(gui, monkeypatch):
+    c, st, _ = gui
+    tid = topic_with_map(c)
+    ids = review_items(st, tid, n=2)
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "limit")
+    c.window.open_page("review")
+    page = c.window.review_page
+    pump()
+    answer_card(page, "порция данных")
+    assert wait(lambda: page.state == "manual")
+    assert "Claude не проверил" in page.verdict_title.text() and page.grades.isVisible()
+    assert page.banner.isVisible() and "Лимит" in page.banner.text()
+    QTest.keyClick(page.grade_buttons[fsrs.GOOD], Qt.Key_3)
+    pump(0.05)
+    a = [x for x in st.attempts() if x["item_id"] == ids[0]][-1]
+    assert a["grade"] == 3 and a["note"] == "своя оценка"
+    assert page.current["id"] == ids[1] and page.check_btn.text().startswith("Показать ответ")
+    answer_card(page, "порция")                                # дальше — сразу своя оценка, без ожидания
+    assert page.state == "manual" and page.grades.isVisible()
+
+
+def test_self_grading_when_check_is_off(gui):
+    c, st, settings = gui
+    settings.set("review.ai_check", False)
+    tid = topic_with_map(c)
+    ids = review_items(st, tid, n=1)
+    c.window.open_page("review")
+    page = c.window.review_page
+    pump()
+    assert page.check_btn.text().startswith("Показать ответ")
+    answer_card(page, "порция данных")
+    assert page.state == "manual" and not page.verdict.isVisible()
+    page.grade(fsrs.EASY)
+    assert [x for x in st.attempts() if x["item_id"] == ids[0]][-1]["grade"] == 4
 
 
 # ---------------------------------------------------------------- разговор
@@ -540,14 +624,15 @@ def test_review_ahead_when_nothing_is_due(gui):
     pump(0.1)
     assert page.ahead and page.current["id"] == ids[0]           # сначала та, что ближе к сроку
     assert "ЗАРАНЕЕ · ПО ПЛАНУ ЗАВТРА" in page.meta.text() and page.subtitle.text() == "Заранее · осталось 2"
-    QTest.keyClick(page.attempt, Qt.Key_Return)
-    page.grade(fsrs.GOOD)
-    pump(0.1)
+    answer_card(page, "Выбирает, куда отправить пакет")
+    assert wait(lambda: "Верно" in page.verdict_title.text())
     a = st.attempts()[-1]
     assert a["phase"] == "ahead" and a["item_id"] == ids[0]
     assert st.item(ids[0])["reps"] == 2
-    page.reveal()
-    page.grade(fsrs.GOOD)
+    page.next_card()
+    answer_card(page, "Выбирает, куда отправить пакет")
+    assert wait(lambda: "Верно" in page.verdict_title.text())
+    page.next_card()
     pump(0.1)
     assert page.current is None and "Готово — всё повторили заранее" in page.empty.text()
     assert not page.ahead_btn.isVisible()

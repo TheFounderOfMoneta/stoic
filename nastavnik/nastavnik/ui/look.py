@@ -49,6 +49,16 @@ def stylesheet(c: dict, text_size: str = "m") -> str:
 #Code {{ font-family: "JetBrains Mono", "Ubuntu Mono", "DejaVu Sans Mono", monospace; font-size: 9.6pt;
          background: {c['card']}; border: 1px solid {c['card_border']}; border-radius: 10px; padding: 10px 12px;
          color: {c['text_soft']}; }}
+#Verdict {{ background: {c['card']}; border: 1px solid {c['card_border']}; border-radius: 10px; }}
+#Verdict[grade="1"] {{ border-left: 3px solid {c['danger']}; }}
+#Verdict[grade="2"] {{ border-left: 3px solid {c['warn']}; }}
+#Verdict[grade="3"], #Verdict[grade="4"] {{ border-left: 3px solid {c['success']}; }}
+#VerdictTitle {{ font-weight: 650; font-size: 10.4pt; color: {c['muted']}; }}
+#VerdictTitle[grade="1"] {{ color: {c['danger']}; }}
+#VerdictTitle[grade="2"] {{ color: {c['warn']}; }}
+#VerdictTitle[grade="3"], #VerdictTitle[grade="4"] {{ color: {c['success']}; }}
+#VerdictText {{ font-family: "{READ_FONT}"; font-size: {size - 0.6:.1f}pt; color: {reading_color(c)}; }}
+#FeedRow {{ color: {c['text_soft']}; font-size: 9.4pt; background: {c['card']}; border-radius: 9px; padding: 8px 11px; }}
 #CodeScroll {{ background: transparent; border: none; }}
 #UserBubble {{ background: {c['accent_soft']}; border-radius: 14px; }}
 #UserText {{ font-size: {size - 1.0:.1f}pt; color: {c['text']}; }}

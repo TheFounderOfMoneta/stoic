@@ -121,6 +121,25 @@ if system_file.endswith("new_topic.md"):
     result("", structured={"concepts": concepts, "first_question": "Почему письмо доходит, даже если часть пути сломана?"})
     sys.exit(0)
 
+# ---------------------------------------------------------------- проверка карточки
+if system_file.endswith("review_check.md"):
+    import re
+    time.sleep(float(os.environ.get("FAKE_CHECK_MS", "0")) / 1000)
+    data = json.loads(prompt[prompt.index("{"):prompt.rindex("}") + 1])
+    answer, ref = data.get("ответ человека", ""), data.get("эталон", "")
+    words = lambda t: {w[:5] for w in re.findall(r"[а-яёa-z0-9]+", t.lower()) if len(w) > 2}
+    if "flowchart" in answer:                      # схема с доски: считаем стрелки
+        arrows = len(re.findall(r"\bn\d+ (?:<)?[-.=]{2,}>?", answer))
+        grade = 3 if arrows >= 1 else 2
+        text = f"Связей на схеме: {arrows}" + (" (и картинку вижу)" if IMAGES else "") + "."
+    else:
+        overlap = len(words(answer) & words(ref)) / max(1, len(words(ref)))
+        grade = 4 if overlap >= 0.8 else 3 if overlap >= 0.5 else 2 if overlap >= 0.2 else 1
+        text = {4: "Всё на месте.", 3: "Суть верна.", 2: "Суть задета, но главное упущено.",
+                1: "Это не про то, о чём спрашивали."}[grade]
+    result("", structured={"grade": grade, "explanation": text})
+    sys.exit(0)
+
 # ---------------------------------------------------------------- собеседник
 if system_file.endswith("listener.md"):
     if opt("--json-schema"):

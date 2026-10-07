@@ -64,7 +64,12 @@ DEFAULTS: dict = {
         "command": "claude",
         "model": "sonnet",
         "fallback_model": "haiku",
+        "review_model": "haiku",          # проверка карточек: короткая задача — быстрой модели хватает
         "timeout_s": 300,
+    },
+    # --- Повторение -----------------------------------------------------------
+    "review": {
+        "ai_check": True,                 # ответ проверяет Claude и сам ставит оценку
     },
     # --- Разговор -------------------------------------------------------------
     "talk": {
@@ -101,6 +106,7 @@ CHOICES = {
     "talk.memory": ("ask", "always", "never"),
     "talk.default_mode": ("listen", "understand", "act"),
     "claude.model": ("sonnet", "opus", "haiku"),
+    "claude.review_model": ("haiku", "sonnet", "opus"),
 }
 
 
