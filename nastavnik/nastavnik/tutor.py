@@ -196,9 +196,10 @@ def build_args(settings, mcp_path: Path, resume: str | None) -> list[str]:
 
 def send(storage, settings, session_id: int, text: str, role: str = "user", confidence: int | None = None,
          on_text: Callable[[str], None] | None = None, on_progress: Callable[[str], None] | None = None,
-         cancel: threading.Event | None = None, db_path: Path | None = None, store: bool = True) -> dict:
+         cancel: threading.Event | None = None, db_path: Path | None = None, store: bool = True,
+         images: list[bytes] | None = None) -> dict:
     """Один ход разговора. role: user — сообщение человека, app — команда приложения.
-    store=False — повтор после сбоя: сообщение уже записано.
+    store=False — повтор после сбоя: сообщение уже записано. images — картинки PNG (доска).
 
     Возвращает {'text', 'rotated', 'tokens'}. Бросает ClaudeError с понятной причиной."""
     ensure_dirs()
@@ -227,7 +228,7 @@ def send(storage, settings, session_id: int, text: str, role: str = "user", conf
         res = claude_cli.run(full, build_args(settings, mcp_path, resume_id),
                              command=settings.get("claude.command", "claude"), on_text=collect,
                              on_progress=on_progress, timeout=float(settings.get("claude.timeout_s", 300)),
-                             cwd=str(CLAUDE_LEARN_DIR), cancel=cancel)
+                             cwd=str(CLAUDE_LEARN_DIR), cancel=cancel, images=images)
         return res, "".join(chunks)
 
     try:
@@ -287,4 +288,5 @@ def export_json(storage) -> str:
     data = {}
     for table in ("topics", "concepts", "items", "attempts", "sessions", "checkpoints", "arms", "talk_notes"):
         data[table] = storage.query(f"SELECT * FROM {table}")
+    data["boards"] = storage.query("SELECT id, ts, session_id, topic_id, item_id, data, mermaid, sent FROM boards")
     return jdump(data)

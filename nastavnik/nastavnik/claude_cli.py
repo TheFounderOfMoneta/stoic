@@ -7,6 +7,7 @@ Claude не установлен. Для разговоров по темам �
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -131,16 +132,26 @@ def _usage_tokens(usage: dict | None) -> int:
 def run(prompt: str, args: list[str], command: str = "claude", stdin: str | None = None,
         on_event: Callable[[dict], None] | None = None, on_progress: Callable[[str], None] | None = None,
         on_text: Callable[[str], None] | None = None, timeout: float = 1500, cwd: str | None = None,
-        env: dict | None = None, cancel: threading.Event | None = None) -> ClaudeResult:
+        env: dict | None = None, cancel: threading.Event | None = None,
+        images: list[bytes] | None = None) -> ClaudeResult:
     """Запустить `claude -p` и дождаться результата. Бросает ClaudeError с понятной причиной.
 
     prompt — задача (передаётся аргументом); stdin — данные (например, блоки текста для перевода).
     on_text получает куски текста по мере генерации (нужен --include-partial-messages).
+    images — картинки PNG (доска со схемой): тогда сообщение уходит через stdin в формате stream-json,
+    текстом и картинками в одном сообщении.
     """
     exe = find_claude(command)
     if not exe:
         raise ClaudeError("not_installed", "claude not found")
-    cmd = [exe, "-p", prompt, "--output-format", "stream-json", "--verbose", *args]
+    if images:
+        content = [{"type": "text", "text": prompt}] + [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                         "data": base64.b64encode(img).decode("ascii")}} for img in images]
+        stdin = json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False) + "\n"
+        cmd = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", *args]
+    else:
+        cmd = [exe, "-p", prompt, "--output-format", "stream-json", "--verbose", *args]
     full_env = dict(os.environ)
     # Ключ API в окружении перебил бы вход по подписке — убираем, чтобы тратилась подписка Pro.
     full_env.pop("ANTHROPIC_API_KEY", None)

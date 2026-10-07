@@ -3,17 +3,24 @@
 Сессия идёт по шаблону «крючок → ядро → практика → по памяти → подарок → петля»; шаг сверху
 подсвечивается по мере того, как Claude его отмечает. Уверенность в ответе — кнопками над полем
 ввода (Alt+1…4): из неё и времени ответа приложение понимает, где вы «знаете», а где угадываете.
+
+Доска (Ctrl+D) открывается справа от чата: задание Claude — сверху, схема рисуется от руки и уходит
+Claude в Mermaid. Когда Claude просит нарисовать схему, кнопка «Доска» подсвечивается сама.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import re
+
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QSplitter, QVBoxLayout, QWidget)
 
 from ..learn import bandit, engine
 from ..tutor import LEVELS, STEP_LABELS
 from ..util import when_text
 from . import widgets as W
+from .board import BoardPanel
 from .chat import ChatInput, ChatView
 from .concept_map import ConceptMap
 from .pages import Page, bar, button, clear_layout, label
@@ -260,8 +267,18 @@ class LearnSessionView(QWidget):
         self.end_btn = button("Закончить", lambda: self.c.learn_end())
         tl.addWidget(self.end_btn)
         outer.addWidget(bar_)
+        self.split = QSplitter(Qt.Horizontal)
+        self.split.setObjectName("SessionSplit")
+        self.split.setChildrenCollapsible(False)
+        self.split.setHandleWidth(1)
         self.chat = ChatView()
-        outer.addWidget(self.chat, 1)
+        self.chat.setMinimumWidth(340)
+        self.split.addWidget(self.chat)
+        self.board = BoardPanel()
+        self.board.setMinimumWidth(460)
+        self.board.hide()
+        self.split.addWidget(self.board)
+        outer.addWidget(self.split, 1)
         bottom = QFrame()
         bottom.setObjectName("BottomBar")
         bl = QHBoxLayout(bottom)
@@ -274,9 +291,89 @@ class LearnSessionView(QWidget):
         bl.addWidget(self.input, 100)
         bl.addStretch(1)
         outer.addWidget(bottom)
+        self.board_btn = QPushButton("Доска")
+        self.board_btn.setObjectName("BoardChip")
+        self.board_btn.setCheckable(True)
+        self.board_btn.setCursor(Qt.PointingHandCursor)
+        self.board_btn.setToolTip("Доска для схем от руки — Ctrl+D. Claude получит схему текстом (Mermaid)")
+        self.board_btn.clicked.connect(self.toggle_board)
+        self.input.conf_layout.addWidget(self.board_btn)
+        sc = QShortcut(QKeySequence("Ctrl+D"), self)
+        sc.setContext(Qt.WidgetWithChildrenShortcut)
+        sc.activated.connect(self.toggle_board)
+        self.board.closed.connect(self.close_board)
+        self.board.wide_toggled.connect(self.set_wide)
+        self.board.send.connect(lambda data, mermaid, png: self.c.learn_send_board(data, mermaid, png))
+        self.board.changed.connect(lambda: self._draft.start())
+        self.chat.schema_open.connect(self.open_schema)
+        self.chat.board_open.connect(lambda: self.open_board())
+        self._draft = QTimer(self)
+        self._draft.setSingleShot(True)
+        self._draft.setInterval(1500)
+        self._draft.timeout.connect(lambda: self.c.save_board_draft())
+
+    # ------------------------------------------------------------- доска
+    def toggle_board(self) -> None:
+        if self.board.isVisible():
+            self.close_board()
+        else:
+            self.open_board()
+
+    def open_board(self, board=None) -> None:
+        if board is not None:
+            if self.board.board.is_empty():
+                self.board.load(board)
+            else:
+                self.board.load(board, keep_history=True)
+                self.c.toast("Схема Claude на доске. Ctrl+Z вернёт ваш рисунок.")
+        texts = self.chat.assistant_texts()
+        self.board.set_task(task_from(texts[-1]) if texts else "")
+        if not self.board.isVisible():
+            self.board.show()
+            total = max(800, self.split.width())
+            self.split.setSizes([max(340, int(total * 0.38)), int(total * 0.62)])
+        self.board_btn.setChecked(True)
+        self.board.canvas.setFocus()
+
+    def open_schema(self, board) -> None:
+        self.open_board(board)
+
+    def close_board(self) -> None:
+        if self.board.isVisible():
+            self.board.canvas.commit_edit()
+            self.c.save_board_draft()
+        self.set_wide(False)
+        self.board.hide()
+        self.board_btn.setChecked(False)
+        self.input.edit.setFocus()
+
+    def set_wide(self, wide: bool) -> None:
+        self.chat.setVisible(not wide)
+        self.board.wide_btn.setChecked(wide)
+
+    def suggest_board(self, on: bool) -> None:
+        """Claude просит нарисовать схему — кнопка доски заметнее (но доска не открывается сама)."""
+        self.board_btn.setProperty("suggest", bool(on))
+        self.board_btn.setText("Нарисовать на доске" if on else "Доска")
+        self.board_btn.style().unpolish(self.board_btn)
+        self.board_btn.style().polish(self.board_btn)
+        self.board_btn.setMinimumWidth(self.board_btn.sizeHint().width())   # жирный шрифт шире обычного
+        self.board_btn.updateGeometry()
+
+    def after_answer(self, text: str, step: str, recall_arm: str = "") -> None:
+        self.suggest_board(wants_board(text, step, recall_arm))
+        if self.board.isVisible():
+            self.board.set_task(task_from(text))
+
+    def set_busy(self, busy: bool) -> None:
+        self.input.set_busy(busy)
+        self.board.set_busy(busy)
 
     def begin(self, topic: dict, formats: dict) -> None:
         self.chat.clear()
+        self.board.load(None)
+        self.close_board()
+        self.suggest_board(False)
         self.back_btn.setText("‹  " + topic["title"][:28])
         plan = (self.c.storage.session(self.c.learn_sid) or {}).get("plan") or {}
         self.topic_label.setText(f"новое: {plan['concept_title']}" if plan.get("concept_title") else "")
@@ -337,6 +434,31 @@ class LearnSessionView(QWidget):
 
     def error_card(self, text: str, fix_label: str | None, fix, retry) -> QWidget:
         return error_card(text, fix_label, fix, retry)
+
+
+_DRAW = re.compile(r"нарису|начерти|изобрази|на доске|(?:сделай|составь|собери|построй|набросай)\s+(?:\w+\s+)?схем"
+                   r"|схем\w*\s+по\s+памяти", re.I)
+_FENCED = re.compile(r"```.*?(?:```|$)", re.S)
+
+
+def wants_board(text: str, step: str = "", recall_arm: str = "") -> bool:
+    """Просит ли Claude нарисовать схему: по концу сообщения (там вопрос) или по формату закрепления.
+    Схема, которую Claude показал сам (блок кода), — не просьба."""
+    prose = _FENCED.sub("\n\n", text or "")
+    paras = [p for p in prose.strip().split("\n\n") if p.strip()]
+    if _DRAW.search(" ".join(paras[-2:])):
+        return True
+    return step == "recall" and recall_arm == "schema_recall"
+
+
+def task_from(text: str) -> str:
+    """Задание для шапки доски: последний абзац с вопросом или просьбой нарисовать."""
+    paras = [p.strip() for p in (text or "").strip().split("\n\n") if p.strip() and not p.strip().startswith("```")]
+    if not paras:
+        return ""
+    pick = next((p for p in reversed(paras) if "?" in p or _DRAW.search(p)), paras[-1])
+    pick = re.sub(r"[*_`#>]+", "", pick).replace("\n", " ").strip()
+    return pick if len(pick) <= 260 else pick[:257].rsplit(" ", 1)[0] + "…"
 
 
 def error_card(text: str, fix_label: str | None, fix, retry) -> QWidget:

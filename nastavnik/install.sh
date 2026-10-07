@@ -22,8 +22,8 @@ PY="$(command -v python3 || true)"
 
 need=()
 "$PY" -c 'import venv, ensurepip' 2>/dev/null || need+=("python3-venv")
-# Qt 6.5+ не запускается под X11 без libxcb-cursor0; notify-send — для напоминаний.
-for lib in libxcb-cursor0 libegl1 libxkbcommon-x11-0 libnotify-bin; do
+# Qt 6.5+ не запускается под X11 без libxcb-cursor0, icccm и keysyms; notify-send — для напоминаний.
+for lib in libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libegl1 libxkbcommon-x11-0 libnotify-bin; do
   dpkg -s "$lib" >/dev/null 2>&1 || need+=("$lib")
 done
 if ((${#need[@]})); then

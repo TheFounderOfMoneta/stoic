@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import gc
 import os
 import sys
 import time
@@ -86,9 +87,11 @@ def close(c) -> None:
         if d is not c.window and d.isVisible():
             d.close()
     c.window.hide()
+    c.detach()
     c.window.deleteLater()
     QAPP.sendPostedEvents(None, QEvent.DeferredDelete)
     QAPP.processEvents()
+    gc.collect()                       # мусор с Qt-объектами — в потоке окна (см. app.main_thread_gc)
 
 
 @pytest.fixture()
@@ -468,6 +471,17 @@ def test_screenshots_of_all_screens(tmp_path, monkeypatch, theme):
                             "Почему тогда пакеты могут прийти не по порядку?")
     pump(0.3)
     c.window.grab().save(str(SHOTS / f"session-{theme}.png"))
+    # доска рядом с чатом: эталон Claude схемой слева, ваш рисунок — справа
+    import random
+    from tests.test_board import draw_request_schema
+    view.chat.add_assistant("Сравни с эталоном:\n\n```mermaid\nflowchart LR\n  A[Просьба] --> B{Срочно?}\n"
+                            "  B -->|да| C[Согласие]\n  B -->|нет| D([Проверка])\n```\n\n"
+                            "Теперь **нарисуй по памяти**, как работает социальная инженерия: от просьбы до согласия.")
+    view.after_answer(view.chat.assistant_texts()[-1], "recall")
+    view.open_board()
+    draw_request_schema(view.board.canvas, random.Random(3))
+    pump(0.9)                                    # подсветка распознанного успевает погаснуть
+    c.window.grab().save(str(SHOTS / f"board-session-{theme}.png"))
     assert all(p.exists() for p in SHOTS.glob(f"*-{theme}.png"))
     close(c)
     st.close()

@@ -39,6 +39,15 @@ if args[:2] == ["auth", "status"]:
     sys.exit(0)
 
 prompt = opt("-p", "") or ""
+IMAGES = 0
+if opt("--input-format") == "stream-json":           # сообщение с картинками приходит через stdin
+    msg = json.loads(sys.stdin.readline() or "{}")
+    content = (msg.get("message") or {}).get("content") or []
+    if isinstance(content, str):
+        prompt = content
+    else:
+        prompt = "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
+        IMAGES = sum(1 for b in content if b.get("type") == "image" and b["source"]["data"])
 resume = opt("--resume")
 system_file = opt("--system-prompt-file", "") or ""
 # Как настоящий Claude Code: без --resume берёт сессию из окружения родителя, если она там есть.
@@ -169,6 +178,19 @@ async def tutor():
                                           "now_can": "объяснить, как пакет находит дорогу"})
                 return ("Подарок: так же устроена почта между планетами в проекте NASA.\n\n"
                         "На следующий раз: почему TCP тормозит при потерях?")
+            if "[доска]" in prompt:
+                import re
+                arrows = len(re.findall(r"\bn\d+ (?:<)?[-.=]{2,}>?", prompt))
+                await call("record_attempt", {"concept": concept, "phase": "recall", "correct": arrows >= 2,
+                                              "grade": 3 if arrows >= 2 else 2, "note": "схема с доски"})
+                await call("set_step", {"step": "recall"})
+                pic = f" и картинку ({IMAGES})" if IMAGES else ""
+                return (f"Вижу схему: стрелок {arrows}{pic}. Сравни с эталоном:\n\n"
+                        "```mermaid\nflowchart LR\n  A[Просьба] --> B{Срочно?}\n  B -->|да| C[Согласие]\n"
+                        "  B -->|нет| D([Проверка])\n```\n\nЧего не хватает в твоей?")
+            if "Нарисуй" in prompt or "нарисуй" in prompt:
+                await call("set_step", {"step": "recall"})
+                return "Закрепим по памяти: нарисуй схему, как работает социальная инженерия — узлы и стрелки."
             correct = "не знаю" not in prompt.lower()
             await call("record_attempt", {"concept": concept, "phase": "practice", "correct": correct,
                                           "grade": 3 if correct else 1, "note": "тест"})

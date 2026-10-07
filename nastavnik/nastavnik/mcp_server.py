@@ -39,7 +39,7 @@ class ConceptIn(BaseModel):
 
 class ItemIn(BaseModel):
     prompt: str = Field(description="Вопрос, понятный без контекста разговора")
-    answer: str = Field("", description="Ответ — до двух предложений (для schema — узлы и связи)")
+    answer: str = Field("", description="Ответ — до двух предложений; для schema — схема Mermaid: flowchart TD, без ```")
     kind: str = Field("card", description="card — вопрос-ответ, task — маленькая задача, schema — схема по памяти")
 
 

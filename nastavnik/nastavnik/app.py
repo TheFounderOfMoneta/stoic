@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import shlex
@@ -57,6 +58,24 @@ class Bridge(QObject):
             fn()
         except Exception:  # noqa: BLE001 — ошибка одного обработчика не должна ронять окно
             log.exception("обработчик в окне")
+
+
+def main_thread_gc(app: QApplication) -> None:
+    """Сборка мусора — только в потоке окна.
+
+    Claude работает в фоновых потоках, и автоматическая сборка мусора Python может сработать прямо там.
+    Если в мусоре окажется Qt-объект с таймером (закрытый диалог, старый контроллер), его деструктор
+    выполнится не в том потоке: таймер останется в очереди окна, и на следующем срабатывании окно
+    упадёт (segfault в QTimerInfoList::activateTimers — так падали тесты). Поэтому автоматическая
+    сборка выключена, а раз в 10 секунд мусор собирается в потоке окна."""
+    if getattr(app, "_nastavnik_gc", None) is not None:
+        return
+    gc.disable()
+    timer = QTimer(app)
+    timer.setInterval(10_000)
+    timer.timeout.connect(gc.collect)
+    timer.start()
+    app._nastavnik_gc = timer
 
 
 class ActivityFilter(QObject):
@@ -164,6 +183,9 @@ class Controller(QObject):
         if self.app is not None:
             self._activity = ActivityFilter(self)
             self.app.installEventFilter(self._activity)
+            from .ui import textclick
+            textclick.install(self.app)             # щелчок с дрожанием руки не выделяет букву (PRIMARY)
+            main_thread_gc(self.app)
         if self.storage.problem:
             self.set_notice("storage", "error", self.storage.problem, "Понятно", lambda: self.clear_notice("storage"))
         if self.services:
@@ -187,10 +209,20 @@ class Controller(QObject):
     def shutdown(self) -> None:
         self.on_close()
         self._cancel.set()
+        self.detach()
+
+    def detach(self) -> None:
+        """Отцепиться от приложения: таймер и фильтр событий не должны пережить контроллер."""
+        if getattr(self, "_tick_timer", None) is not None:
+            self._tick_timer.stop()
+        if self.app is not None and getattr(self, "_activity", None) is not None:
+            self.app.removeEventFilter(self._activity)
+            self._activity = None
 
     def on_close(self) -> None:
         """Окно закрывается: время сохранить, идущие сессии корректно завершить."""
         if self.learn_sid and self.learn_phase != "done":
+            self.save_board_draft()
             tutor.finish_session(self.storage, self.learn_sid, None, self._end_active())
             self.learn_sid = None
         if self.talk_sid and self.talk_phase != "done":
@@ -387,11 +419,44 @@ class Controller(QObject):
         self.window.session_view.chat.add_user(text, confidence)
         self._learn_turn(text, "user", confidence)
 
-    def _learn_turn(self, text: str, role: str, confidence: int | None = None, store: bool = True) -> None:
+    def learn_send_board(self, data: dict, mermaid: str, png: bytes | None) -> None:
+        """Схема с доски: Claude получает Mermaid (и картинку, если есть подписи от руки),
+        комментарий и уверенность берутся из поля ответа."""
+        if not self.learn_sid or self.learn_busy or self.learn_phase != "chat":
+            return
+        from . import sketch
+        from .ui import board as board_ui
+        from .ui import widgets as W
+        view = self.window.session_view
+        sid = self.learn_sid
+        comment, confidence = view.input.take()
+        board = sketch.Board.from_dict(data)
+        last = self.storage.last_board(sid, sent=True)
+        prev = sketch.Board.from_dict(last["data"]) if last else None
+        text = sketch.board_prompt(board, comment, image=png is not None, prev=prev)
+        self.storage.save_board(data, mermaid, png, session_id=sid, topic_id=self.learn_topic, sent=True)
+        thumb = board_ui.render_image(board, max_w=920, pal=W.PALETTE, scale=1.0)
+        caption = "Схема с доски: " + sketch.describe(board) + (" · с картинкой" if png else "")
+        view.chat.add_board(thumb, caption, comment, confidence)
+        view.suggest_board(False)
+        self.storage.log_event("board_sent", value=len(board.shapes), meta=str(sid))
+        self._learn_turn(text, "user", confidence, images=[png] if png else None)
+
+    def save_board_draft(self) -> None:
+        if not self.learn_sid or not self.window:
+            return
+        b = self.window.session_view.board.board
+        if not b.is_empty():
+            from . import sketch
+            self.storage.save_board(b.to_dict(), sketch.to_mermaid(b), session_id=self.learn_sid,
+                                    topic_id=self.learn_topic, sent=False)
+
+    def _learn_turn(self, text: str, role: str, confidence: int | None = None, store: bool = True,
+                    images: list[bytes] | None = None) -> None:
         view = self.window.session_view
         sid = self.learn_sid
         self.learn_busy = True
-        view.input.set_busy(True)
+        view.set_busy(True)
         view.end_btn.setEnabled(False)
         view.chat.set_thinking("Claude думает…")
         view.chat.add_assistant()
@@ -410,13 +475,16 @@ class Controller(QObject):
                 return
             self.learn_busy = False
             view.chat.end_stream(res.get("text"))
-            view.steps.set_step(tutor.step_of(self.storage, sid))
+            step = tutor.step_of(self.storage, sid)
+            view.steps.set_step(step)
+            arms = (self.storage.session(sid) or {}).get("arms") or {}
+            view.after_answer(res.get("text") or "", step, arms.get("recall", ""))
             if res.get("rotated"):
                 view.chat.add_note("Начат новый разговор с Claude — состояние темы передано, ничего не потеряно.")
             if self.learn_phase == "closing":
                 self._learn_rating()
                 return
-            view.input.set_busy(False)
+            view.set_busy(False)
             view.end_btn.setEnabled(True)
 
         def fail(exc: Exception) -> None:
@@ -436,16 +504,16 @@ class Controller(QObject):
 
             def retry() -> None:
                 card.hide()
-                self._learn_turn(text, role, confidence, store=False)
+                self._learn_turn(text, role, confidence, store=False, images=images)
             card = view.error_card(msg, fix_label, fix, retry)
             view.chat.add_widget(card)
-            view.input.set_busy(False)
+            view.set_busy(False)
             view.end_btn.setEnabled(True)
 
         db = self.db_path
         self.spawn(lambda: tutor.send(self.storage, self.settings, sid, text, role, confidence,
                                       on_text=lambda p: self.ui(piece, p), on_progress=lambda m: self.ui(progress, m),
-                                      cancel=self._cancel, db_path=db, store=store), done, fail)
+                                      cancel=self._cancel, db_path=db, store=store, images=images), done, fail)
 
     def learn_end(self) -> None:
         if not self.learn_sid or self.learn_busy:
@@ -463,8 +531,10 @@ class Controller(QObject):
 
     def _learn_rating(self) -> None:
         view = self.window.session_view
+        self.save_board_draft()
+        view.close_board()
         self.learn_phase = "rating"
-        view.input.set_busy(True)
+        view.set_busy(True)
         view.input.send.setText("Сессия завершена")
         view.end_btn.setEnabled(False)
         view.chat.add_widget(view.finished_card(self.learn_finish))
@@ -480,6 +550,7 @@ class Controller(QObject):
         self.refresh_home()
 
     def learn_close(self) -> None:
+        self.save_board_draft()
         topic = self.learn_topic
         if self.learn_sid and self.learn_phase != "done":
             tutor.finish_session(self.storage, self.learn_sid, None, self._end_active())

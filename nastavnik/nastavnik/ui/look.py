@@ -49,6 +49,7 @@ def stylesheet(c: dict, text_size: str = "m") -> str:
 #Code {{ font-family: "JetBrains Mono", "Ubuntu Mono", "DejaVu Sans Mono", monospace; font-size: 9.6pt;
          background: {c['card']}; border: 1px solid {c['card_border']}; border-radius: 10px; padding: 10px 12px;
          color: {c['text_soft']}; }}
+#CodeScroll {{ background: transparent; border: none; }}
 #UserBubble {{ background: {c['accent_soft']}; border-radius: 14px; }}
 #UserText {{ font-size: {size - 1.0:.1f}pt; color: {c['text']}; }}
 #AppNote {{ color: {c['muted']}; font-size: 8.6pt; background: {c['card']}; border-radius: 10px; padding: 3px 10px; }}
@@ -77,6 +78,19 @@ def stylesheet(c: dict, text_size: str = "m") -> str:
 #Big {{ font-size: 12pt; }}
 #Dialog {{ background: {c['window_solid']}; }}
 #DialogTitle {{ font-size: 15pt; font-weight: 700; letter-spacing: -0.3px; }}
+#BoardPanel {{ background: {c['window_solid']}; border-left: 1px solid {c['hairline']}; }}
+#BoardTask {{ font-family: "{READ_FONT}"; font-size: {size - 1.4:.1f}pt; color: {c['text_soft']}; background: {c['card']};
+              border-radius: 9px; padding: 7px 11px; }}
+#BoardEditor {{ background: {c['card_solid']}; border: 1px solid {c['accent']}; border-radius: 7px; padding: 2px 7px;
+                font-size: 10pt; color: {c['text']}; }}
+#BoardMermaid {{ font-family: "JetBrains Mono", "Ubuntu Mono", "DejaVu Sans Mono", monospace; font-size: 8.8pt;
+                 background: {c['card']}; border: 1px solid {c['card_border']}; border-radius: 8px; padding: 4px 6px;
+                 color: {c['text_soft']}; }}
+#BoardChip {{ background: {c['button']}; border: none; border-radius: 13px; padding: 5px 12px; font-size: 9.2pt; }}
+#BoardChip:hover {{ background: {c['pressed']}; }}
+#BoardChip:checked {{ background: {c['accent_soft']}; color: {c['accent']}; font-weight: 600; }}
+#BoardChip[suggest="true"] {{ background: {c['accent']}; color: {c['accent_text']}; font-weight: 600; }}
+#SessionSplit::handle {{ background: {c['hairline']}; }}
 #Toast {{ background: {c['card_solid']}; border: 1px solid {c['card_border']}; border-radius: 12px; }}
 #ToastText {{ color: {c['text']}; }}
 #ErrorCard {{ background: rgba(255, 95, 87, 30); border-radius: 12px; }}

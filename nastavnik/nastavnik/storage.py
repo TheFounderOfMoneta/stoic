@@ -162,6 +162,19 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_kind ON events(kind, ts);
 
+CREATE TABLE IF NOT EXISTS boards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    session_id INTEGER,
+    topic_id INTEGER,
+    item_id INTEGER,
+    data TEXT NOT NULL DEFAULT '{}',
+    mermaid TEXT NOT NULL DEFAULT '',
+    png BLOB,
+    sent INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS boards_session ON boards(session_id);
+
 CREATE TABLE IF NOT EXISTS talk_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -440,6 +453,7 @@ class Storage:
     def delete_session(self, session_id: int) -> None:
         with self._lock:
             self.db.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+            self.db.execute("DELETE FROM boards WHERE session_id=?", (session_id,))
             self.db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             self.db.commit()
 
@@ -467,6 +481,40 @@ class Storage:
         latency = int((user["ts"] - prev["ts"]) * 1000) if prev else 0
         return {"text": user["text"], "confidence": user["confidence"], "latency_ms": max(0, latency),
                 "ts": user["ts"]}
+
+    # ------------------------------------------------------------------ доски
+    def save_board(self, data: dict, mermaid: str = "", png: bytes | None = None, session_id: int | None = None,
+                   topic_id: int | None = None, item_id: int | None = None, sent: bool = False) -> int:
+        """Схема с доски. Черновик (sent=0) у сессии один — перезаписывается; отправленные копятся."""
+        with self._lock:
+            if not sent and session_id is not None:
+                self.db.execute("DELETE FROM boards WHERE session_id=? AND sent=0", (session_id,))
+            cur = self.db.execute(
+                "INSERT INTO boards(ts, session_id, topic_id, item_id, data, mermaid, png, sent) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (now(), session_id, topic_id, item_id, jdump(data), mermaid, png, int(sent)))
+            self.db.commit()
+            return int(cur.lastrowid)
+
+    def boards(self, session_id: int | None = None, item_id: int | None = None, sent: bool | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM boards WHERE 1=1", []
+        if session_id is not None:
+            sql += " AND session_id=?"
+            args.append(session_id)
+        if item_id is not None:
+            sql += " AND item_id=?"
+            args.append(item_id)
+        if sent is not None:
+            sql += " AND sent=?"
+            args.append(int(sent))
+        rows = self.query(sql + " ORDER BY id", args)
+        for r in rows:
+            r["data"] = jload(r["data"], {})
+        return rows
+
+    def last_board(self, session_id: int, sent: bool | None = None) -> dict | None:
+        rows = self.boards(session_id=session_id, sent=sent)
+        return rows[-1] if rows else None
 
     # ------------------------------------------------------------------ чекпоинты
     def add_checkpoint(self, topic_id: int, session_id: int | None, covered: str = "", difficulties: str = "",

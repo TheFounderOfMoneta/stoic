@@ -3,7 +3,9 @@
 - Ответ появляется потоком, по мере генерации, но перерисовывается не чаще 30 раз в секунду
   и только последнее сообщение — окно не замирает даже на длинных ответах.
 - Свой маленький Markdown (абзацы, жирный/курсив, списки, заголовки, код): полный контроль над
-  типографикой. Схемы в блоках кода — моноширинным шрифтом на карточке, как их любит рисовать Claude.
+  типографикой. Схемы Claude в блоках ```mermaid рисуются картинкой (по щелчку — на доску, поправить
+  от руки); прочий код — моноширинным шрифтом на карточке.
+- Схема, отправленная с доски, — облачко с миниатюрой: видно, что именно ушло Claude.
 - Если вы прокрутили вверх, чат не дёргает вас вниз при каждом новом слове.
 """
 from __future__ import annotations
@@ -12,9 +14,11 @@ import html
 import re
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QScrollArea,
                                QSizePolicy, QVBoxLayout, QWidget)
 
+from .. import sketch
 from .look import LINE_HEIGHT, READER_W
 
 _FENCE = re.compile(r"^\s*```")
@@ -49,12 +53,16 @@ def md_blocks(text: str) -> list[tuple[str, object]]:
         line = lines[i]
         if _FENCE.match(line):
             flush()
+            lang = line.strip()[3:].strip().lower()
             code = []
             i += 1
             while i < len(lines) and not _FENCE.match(lines[i]):
                 code.append(lines[i])
                 i += 1
-            blocks.append(("code", "\n".join(code).rstrip("\n")))
+            closed = i < len(lines)
+            body = "\n".join(code).rstrip("\n")
+            # схема — когда блок дописан: пока Claude её печатает, это просто код
+            blocks.append(("mermaid" if lang == "mermaid" and closed else "code", body))
             i += 1
             continue
         m = _H.match(line)
@@ -110,18 +118,84 @@ def block_html(kind: str, content) -> str:
     return _wrap(str(content))
 
 
+class SchemaBlock(QWidget):
+    """Схема Claude из блока mermaid: картинка, «Открыть на доске» и исходный текст по запросу."""
+
+    def __init__(self, code: str, board: sketch.Board, on_open=None):
+        super().__init__()
+        from .board import SchemaView
+        self.code = code
+        self.board = board
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.view = SchemaView(board, max_h=460, clickable=on_open is not None)
+        if on_open:
+            self.view.clicked.connect(lambda: on_open(self.board.copy()))
+        lay.addWidget(self.view)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        if on_open:
+            b = QPushButton("Открыть на доске")
+            b.setObjectName("Link")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip("Схема окажется на доске: дорисуйте, поправьте и отправьте обратно")
+            b.clicked.connect(lambda: on_open(self.board.copy()))
+            row.addWidget(b)
+        self.src_btn = QPushButton("Текст схемы")
+        self.src_btn.setObjectName("Link")
+        self.src_btn.setCursor(Qt.PointingHandCursor)
+        row.addWidget(self.src_btn)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.src = QLabel(code)
+        self.src.setObjectName("Code")
+        self.src.setTextFormat(Qt.PlainText)
+        self.src.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.src.hide()
+        lay.addWidget(self.src)
+        self.src_btn.clicked.connect(lambda: self.src.setVisible(not self.src.isVisible()))
+
+
 class AssistantMessage(QWidget):
     """Сообщение Claude: блоки текста, переиспользуемые при потоковом обновлении."""
 
-    def __init__(self, text: str = ""):
+    def __init__(self, text: str = "", on_schema=None):
         super().__init__()
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.setSpacing(10)
-        self.labels: list[tuple[str, QLabel]] = []
+        self.labels: list[tuple[str, QWidget]] = []
         self.text = ""
+        self.on_schema = on_schema
+        self._parsed: dict[str, sketch.Board | None] = {}
         if text:
             self.set_text(text)
+
+    def _schema(self, code: str) -> sketch.Board | None:
+        if code not in self._parsed:
+            from .board import schema_from_mermaid
+            self._parsed[code] = schema_from_mermaid(code)
+        return self._parsed[code]
+
+    def _name(self, kind: str, content) -> str:
+        if kind == "mermaid":
+            return "Schema" if self._schema(str(content)) is not None else "Code"
+        return {"code": "Code", "h": "BodyH"}.get(kind, "Body")
+
+    def _make(self, kind: str, content) -> tuple[str, QWidget]:
+        name = self._name(kind, content)
+        if name == "Schema":
+            return name, SchemaBlock(str(content), self._schema(str(content)), self.on_schema)
+        if name == "Code":
+            return name, CodeView()
+        label = QLabel()
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
+        label.setOpenExternalLinks(True)
+        label.setObjectName(name)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        return name, label
 
     def set_text(self, text: str) -> None:
         if text == self.text:
@@ -129,27 +203,24 @@ class AssistantMessage(QWidget):
         self.text = text
         blocks = md_blocks(text)
         for k, (kind, content) in enumerate(blocks):
-            name = {"code": "Code", "h": "BodyH"}.get(kind, "Body")
-            if k < len(self.labels) and self.labels[k][0] == name:
-                label = self.labels[k][1]
-            else:
-                label = QLabel()
-                label.setWordWrap(True)
-                label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
-                label.setOpenExternalLinks(True)
-                label.setObjectName(name)
-                label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            name = self._name(kind, content)
+            reuse = k < len(self.labels) and self.labels[k][0] == name
+            if reuse and name == "Schema" and self.labels[k][1].code != content:
+                reuse = False
+            if not reuse:
+                name, widget = self._make(kind, content)
                 if k < len(self.labels):
                     old = self.labels[k][1]
-                    self.lay.replaceWidget(old, label)
+                    self.lay.replaceWidget(old, widget)
                     old.deleteLater()
-                    self.labels[k] = (name, label)
+                    self.labels[k] = (name, widget)
                 else:
-                    self.lay.addWidget(label)
-                    self.labels.append((name, label))
-            if kind == "code":
-                label.setTextFormat(Qt.PlainText)
-                label.setWordWrap(False)
+                    self.lay.addWidget(widget)
+                    self.labels.append((name, widget))
+            name, label = self.labels[k]
+            if name == "Schema":
+                continue
+            if kind in ("code", "mermaid"):
                 if label.text() != content:
                     label.setText(str(content))
             else:
@@ -162,37 +233,106 @@ class AssistantMessage(QWidget):
             self.lay.removeWidget(old)
             old.deleteLater()
 
+    def schemas(self) -> list[SchemaBlock]:
+        return [w for name, w in self.labels if name == "Schema"]
+
 
 class UserMessage(QWidget):
-    def __init__(self, text: str, note: str = ""):
+    def __init__(self, text: str, note: str = "", image=None, caption: str = "", on_image=None):
         super().__init__()
         row = QHBoxLayout(self)
         row.setContentsMargins(80, 0, 0, 0)
+        self.row = row
         row.addStretch(1)
         bubble = QFrame()
         bubble.setObjectName("UserBubble")
         bl = QVBoxLayout(bubble)
         bl.setContentsMargins(14, 9, 14, 9)
-        bl.setSpacing(3)
+        bl.setSpacing(5)
+        self.image = None
+        self._image = image
+        if image is not None:                       # схема с доски — миниатюрой
+            self.image = QLabel()
+            self.image.setObjectName("BoardThumb")
+            if on_image:
+                self.image.setCursor(Qt.PointingHandCursor)
+                self.image.setToolTip("Открыть доску")
+                self.image.mousePressEvent = lambda _e: on_image()
+            bl.addWidget(self.image, 0, Qt.AlignRight)
+            if caption:
+                cap = QLabel(caption)
+                cap.setObjectName("Meta")
+                cap.setAlignment(Qt.AlignRight)
+                cap.setWordWrap(True)
+                bl.addWidget(cap)
         self.label = QLabel(text)
         self.label.setObjectName("UserText")
         self.label.setWordWrap(True)
         self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.label.setMaximumWidth(500)
-        # перенос строк у QLabel не знает желаемой ширины — задаём её по самой длинной строке
-        longest = max((self.label.fontMetrics().horizontalAdvance(line) for line in text.split("\n")), default=0)
-        self.label.setMinimumWidth(min(500, longest + 4))
+        # перенос строк у QLabel не знает желаемой ширины — задаём её по самой длинной строке (см. fit)
+        self._want = max((self.label.fontMetrics().horizontalAdvance(line) for line in text.split("\n")), default=0) + 4
         bl.addWidget(self.label)
+        self.label.setVisible(bool(text))
         if note:
             n = QLabel(note)
             n.setObjectName("Meta")
             n.setAlignment(Qt.AlignRight)
             bl.addWidget(n)
         row.addWidget(bubble)
+        self.fit(READER_W)
+
+    def fit(self, avail: int) -> None:
+        """Подогнать под ширину колонки: рядом с доской чат узкий, и облачко не должно его распирать."""
+        indent = 80 if avail >= 520 else 24
+        self.row.setContentsMargins(indent, 0, 0, 0)
+        inner = max(140, avail - indent - 30)
+        self.label.setMaximumWidth(min(500, inner))
+        self.label.setMinimumWidth(min(500, inner, self._want))
+        if self._image is not None:
+            w = min(460, inner)
+            pix = QPixmap.fromImage(self._image)
+            if pix.width() > w or pix.height() > 300:
+                pix = pix.scaled(w, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.image.setPixmap(pix)
+
+
+class CodeView(QScrollArea):
+    """Код и текстовые схемы — без переноса строк; в узкой колонке прокручиваются вбок."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("CodeScroll")
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(True)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.viewport().setAutoFillBackground(False)
+        self.label = QLabel()
+        self.label.setObjectName("Code")
+        self.label.setTextFormat(Qt.PlainText)
+        self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.setWidget(self.label)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self.label.setText(text)
+        self.label.adjustSize()
+        bar = self.horizontalScrollBar().sizeHint().height() if self.label.sizeHint().width() > self.width() else 0
+        self.setFixedHeight(self.label.sizeHint().height() + bar + 2)
+
+    def text(self) -> str:
+        return self.label.text()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.setText(self.label.text())
 
 
 class ChatView(QScrollArea):
     """Лента сообщений по центру окна, колонка 680 px."""
+
+    schema_open = Signal(object)        # Board — схему Claude открыть на доске
+    board_open = Signal()               # щёлкнули по своей схеме
 
     def __init__(self):
         super().__init__()
@@ -238,15 +378,37 @@ class ChatView(QScrollArea):
     def _insert(self, widget: QWidget) -> QWidget:
         self.col.insertWidget(self.col.count() - 1, widget)       # перед строкой «думает…»
         self._stick = True
+        if isinstance(widget, UserMessage):
+            widget.fit(self._avail())
         return widget
+
+    def _margin(self) -> int:
+        return 36 if self.viewport().width() >= 560 else 16
+
+    def _avail(self) -> int:
+        return max(200, min(READER_W, self.viewport().width() - 2 * self._margin()))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        m = self._margin()
+        self.widget().layout().setContentsMargins(m, 26, m, 26)
+        avail = self._avail()
+        for m in self.column.findChildren(UserMessage):
+            m.fit(avail)
 
     # ------------------------------------------------------------- сообщения
     def add_user(self, text: str, confidence: int | None = None) -> None:
         note = {1: "наугад", 2: "не уверен", 3: "скорее уверен", 4: "уверен"}.get(confidence or 0, "")
         self._insert(UserMessage(text, note))
 
+    def add_board(self, image, caption: str, comment: str = "", confidence: int | None = None) -> UserMessage:
+        note = {1: "наугад", 2: "не уверен", 3: "скорее уверен", 4: "уверен"}.get(confidence or 0, "")
+        msg = UserMessage(comment, note, image=image, caption=caption, on_image=self.board_open.emit)
+        self._insert(msg)
+        return msg
+
     def add_assistant(self, text: str = "") -> AssistantMessage:
-        self.current = AssistantMessage(text)
+        self.current = AssistantMessage(text, on_schema=self.schema_open.emit)
         self._buffer = text
         self._insert(self.current)
         return self.current
@@ -342,6 +504,7 @@ class ChatInput(QWidget):
             self.conf_buttons.append(b)
             cr.addWidget(b)
         cr.addStretch(1)
+        self.conf_layout = cr                      # справа — место для кнопок сессии (доска)
         outer.addWidget(self.conf_row)
         self.conf_row.setVisible(confidence)
         row = QHBoxLayout()
@@ -382,15 +545,20 @@ class ChatInput(QWidget):
                 return True
         return False
 
-    def submit(self) -> None:
+    def take(self) -> tuple[str, int | None]:
+        """Забрать текст и уверенность (поле очищается): комментарий к схеме с доски."""
         text = self.edit.toPlainText().strip()
-        if not text or not self.send.isEnabled():
-            return
         conf = self.confidence if self.conf_row.isVisible() else None
         self.edit.clear()
         self.confidence = None                          # уверенность — к каждому ответу заново
         for b in self.conf_buttons:
             b.setChecked(False)
+        return text, conf
+
+    def submit(self) -> None:
+        if not self.edit.toPlainText().strip() or not self.send.isEnabled():
+            return
+        text, conf = self.take()
         self.submitted.emit(text, conf)
 
     def set_busy(self, busy: bool) -> None:
