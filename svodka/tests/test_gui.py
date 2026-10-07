@@ -183,14 +183,18 @@ def test_reader_translates_streaming_and_records_reading(gui):
     reader = c.window.reader
     assert not c.window.sidebar.isVisible() and reader.article["id"] == aid
     assert wait(lambda: storage.article(aid)["translate_status"] == "done")
-    assert wait(lambda: all(w.block.get("text_ru") for w in reader.block_widgets.values()))
-    p = next(w for w in reader.block_widgets.values() if w.block["type"] == "p")
-    assert p.label.text().count("Перевод:") == 1
-    code = next(w for w in reader.block_widgets.values() if w.block["type"] == "code")
-    assert code.block["text_ru"] == "print(1)"              # код не переводится
-    reader.set_mode("orig")
-    assert "Перевод:" not in p.label.text()
-    reader.set_mode("ru")
+    assert wait(lambda: not reader.translating)
+    kinds = [b["type"] for b in reader.shown]
+    assert kinds == ["h2", "p", "p", "code"]                  # только русский текст, код — как в оригинале
+    texts = [b["text"] for b in reader.shown]
+    assert all("Русский перевод" in t for t in texts[:3]) and texts[3] == "print(1)"
+    assert not hasattr(reader, "seg")                         # переключателя «Оригинал» больше нет
+    assert not reader.status.isVisible()
+    # повторное открытие — без нового перевода, из сохранённого
+    calls = []
+    c.translate = lambda *a, **k: calls.append(a)
+    reader.open(aid)
+    assert [b["type"] for b in reader.shown] == kinds and not calls
     reader.active_ms = 200_000                               # прочитали внимательно
     reader.max_scroll = 1.0
     reader.back.emit()

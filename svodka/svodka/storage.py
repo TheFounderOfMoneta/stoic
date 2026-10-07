@@ -72,6 +72,22 @@ CREATE TABLE IF NOT EXISTS blocks (
     PRIMARY KEY (article_id, idx)
 );
 
+-- Готовый русский текст статьи (редакторский перевод) — блоки свои, не 1:1 с оригиналом
+CREATE TABLE IF NOT EXISTS ru_blocks (
+    article_id INTEGER NOT NULL,
+    idx INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    src TEXT,
+    PRIMARY KEY (article_id, idx)
+);
+
+-- Заголовки, которые уже показывали Claude при отборе (повторно не предлагаем — экономия)
+CREATE TABLE IF NOT EXISTS offered (
+    url_key TEXT PRIMARY KEY,
+    ts REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -455,6 +471,36 @@ class Storage:
     def blocks(self, article_id: int) -> list[dict]:
         return [dict(r) for r in self.query("SELECT * FROM blocks WHERE article_id=? ORDER BY idx", (article_id,))]
 
+    # ------------------------------------------------------------------ русский текст
+    def ru_blocks(self, article_id: int) -> list[dict]:
+        return [dict(r) for r in self.query("SELECT * FROM ru_blocks WHERE article_id=? ORDER BY idx", (article_id,))]
+
+    def clear_ru_blocks(self, article_id: int) -> None:
+        self.execute("DELETE FROM ru_blocks WHERE article_id=?", (article_id,))
+
+    def add_ru_block(self, article_id: int, idx: int, kind: str, text: str, src: str | None = None) -> None:
+        self.execute("INSERT OR REPLACE INTO ru_blocks(article_id, idx, type, text, src) VALUES (?, ?, ?, ?, ?)",
+                     (article_id, idx, kind, text, src))
+
+    # ------------------------------------------------------------------ отбор кандидатов
+    def offered_recently(self, url_keys: Iterable[str], hours: float = 36) -> set[str]:
+        keys = [k for k in url_keys if k]
+        out: set[str] = set()
+        cutoff = now() - hours * 3600
+        for i in range(0, len(keys), 400):
+            chunk = keys[i:i + 400]
+            marks = ",".join("?" for _ in chunk)
+            out |= {r["url_key"] for r in self.query(
+                f"SELECT url_key FROM offered WHERE ts >= ? AND url_key IN ({marks})", (cutoff, *chunk))}
+        return out
+
+    def mark_offered(self, url_keys: Iterable[str]) -> None:
+        ts = now()
+        with self._lock:
+            self.db.executemany("INSERT OR REPLACE INTO offered(url_key, ts) VALUES (?, ?)",
+                                [(k, ts) for k in url_keys if k])
+            self.db.commit()
+
     def set_block_ru(self, article_id: int, idx: int, text: str) -> None:
         self.execute("UPDATE blocks SET text_ru=? WHERE article_id=? AND idx=?", (text, article_id, idx))
 
@@ -666,11 +712,13 @@ class Storage:
                 chunk = ids[i:i + 400]
                 marks = ",".join("?" for _ in chunk)
                 self.db.execute(f"DELETE FROM blocks WHERE article_id IN ({marks})", chunk)
+                self.db.execute(f"DELETE FROM ru_blocks WHERE article_id IN ({marks})", chunk)
                 if self.fts_ok:
                     self.db.execute(f"DELETE FROM fts WHERE rowid IN ({marks})", chunk)
                 self.db.execute(f"UPDATE articles SET purged=1, summary_ru='[]', translate_status='none' "
                                 f"WHERE id IN ({marks})", chunk)
             self.db.execute("DELETE FROM seen_urls WHERE ts < ?", (cutoff,))
+            self.db.execute("DELETE FROM offered WHERE ts < ?", (now() - 7 * 86400,))
             self.db.execute("DELETE FROM extracted WHERE ts < ?", (now() - 7 * 86400,))
             self.db.commit()
         return len(ids)

@@ -1,8 +1,8 @@
-"""Читалка: статья целиком по-русски, оригинал в один клик, режим сосредоточенности.
+"""Читалка: статья целиком и только по-русски, режим сосредоточенности.
 
 - Колонка 680 px (~66 знаков в строке), шрифт Literata, мягкий цвет текста.
-- Сверху «Коротко»; перевод появляется абзац за абзацем, пока Claude переводит.
-- У абзаца при наведении — «EN»: оригинал раскрывается под ним.
+- Сверху «Коротко»; русский текст — редакторский перевод Claude, абзацы появляются по мере готовности.
+  Оригинала на экране нет (он не нужен); если что — «Открыть на сайте» в меню «⋯».
 - Время чтения (только пока окно активно и вы что-то делаете) и глубина прокрутки идут в обучение.
 - В конце: реакции, иногда опрос «Стоило времени?», вопрос Claude по статье, «Похожее».
 """
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QP
 from ..config import IMAGES_DIR
 from ..rank.features import KINDS
 from ..rank.signals import expected_ms
+from ..translate import TEXT_TYPES, is_condensed
 from ..util import words_count
 from . import widgets as W
 from .feed_view import age_text
@@ -31,6 +32,13 @@ ACTIVE_GAP_S = 60      # без мыши/клавиатуры дольше — �
 
 def _html(text: str) -> str:
     return f'<div style="line-height:{LINE_HEIGHT}%;">{html.escape(text or "").replace(chr(10), "<br>")}</div>'
+
+
+def _table_html(text: str) -> str:
+    rows = [r.split(" | ") for r in (text or "").split("\n") if r.strip()]
+    cells = "".join("<tr>" + "".join(f'<td style="padding:4px 10px 4px 0;">{html.escape(c)}</td>' for c in r)
+                    + "</tr>" for r in rows)
+    return f'<table cellspacing="0">{cells}</table>'
 
 
 class _ImageLoader(QObject):
@@ -54,94 +62,32 @@ class _ImageLoader(QObject):
         threading.Thread(target=work, daemon=True).start()
 
 
-class BlockWidget(QFrame):
-    """Один блок статьи: перевод (или оригинал), а при наведении — «EN» для оригинала."""
-
-    def __init__(self, block: dict, mode: str, translating: bool):
-        super().__init__()
-        self.block = block
-        self.mode = mode
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
-        col = QVBoxLayout()
-        col.setSpacing(4)
-        self.label = QLabel()
-        self.label.setWordWrap(True)
-        self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.label.setTextFormat(Qt.RichText)
-        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.orig = QLabel()
-        self.orig.setObjectName("BodyOrig")
-        self.orig.setWordWrap(True)
-        self.orig.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.orig.hide()
-        col.addWidget(self.label)
-        col.addWidget(self.orig)
-        lay.addLayout(col, 1)
-        self.en = QPushButton("EN")
-        self.en.setObjectName("Original")
-        self.en.setToolTip("Показать оригинал абзаца")
-        self.en.setCursor(Qt.PointingHandCursor)
-        self.en.setFixedWidth(30)
-        self.en.clicked.connect(self.toggle_original)
-        self.en.setVisible(False)
-        lay.addWidget(self.en, 0, Qt.AlignTop)
-        if block["type"] == "quote":
-            self.setObjectName("Quote")
-            lay.setContentsMargins(16, 0, 0, 0)
-        self.render(translating)
-
-    def text(self) -> str:
-        b = self.block
-        if self.mode == "orig" or b["type"] in ("code", "img"):
-            return b["text_orig"]
-        return b["text_ru"] or b["text_orig"]
-
-    def render(self, translating: bool = False) -> None:
-        b = self.block
-        t = b["type"]
-        has_ru = bool(b.get("text_ru"))
-        faded = self.mode == "ru" and not has_ru and translating
-        name = {"h2": "ReaderH2", "h3": "ReaderH3", "quote": "QuoteText", "code": "Code"}.get(
-            t, "BodyFaded" if faded else "Body")
-        self.label.setObjectName(name)
-        self.label.style().unpolish(self.label)
-        self.label.style().polish(self.label)
-        text = self.text()
-        if t == "li":
-            text = "•  " + text
-        if t == "code":
-            self.label.setTextFormat(Qt.PlainText)
-            self.label.setText(text)
-        elif t in ("h2", "h3"):
-            self.label.setTextFormat(Qt.PlainText)
-            self.label.setText(text)
-        else:
-            self.label.setTextFormat(Qt.RichText)
-            self.label.setText(_html(text))
-
-    def set_translation(self, ru: str) -> None:
-        self.block["text_ru"] = ru
-        self.render(False)
-
-    def toggle_original(self) -> None:
-        if self.orig.isVisible():
-            self.orig.hide()
-        else:
-            self.orig.setText(self.block["text_orig"] if self.mode == "ru" else (self.block.get("text_ru") or ""))
-            self.orig.show()
-
-    def enterEvent(self, event) -> None:  # noqa: N802
-        if self.block["type"] not in ("code", "img", "h2", "h3") and self.block.get("text_ru") \
-                and self.block["text_ru"] != self.block["text_orig"]:
-            self.en.setText("EN" if self.mode == "ru" else "RU")
-            self.en.setVisible(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self.en.setVisible(False)
-        super().leaveEvent(event)
+def block_label(block: dict) -> QLabel:
+    """Один блок текста: абзац, подзаголовок, пункт, цитата, код или таблица."""
+    t, text = block["type"], block.get("text") or ""
+    lab = QLabel()
+    lab.setWordWrap(True)
+    lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    lab.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    lab.setObjectName({"h2": "ReaderH2", "h3": "ReaderH3", "quote": "QuoteText", "code": "Code"}.get(t, "Body"))
+    if t in ("h2", "h3", "code"):
+        lab.setTextFormat(Qt.PlainText)
+        lab.setText(text)
+    elif t == "table":
+        lab.setTextFormat(Qt.RichText)
+        lab.setText(_table_html(text))
+    else:
+        lab.setTextFormat(Qt.RichText)
+        lab.setText(_html(("•  " + text) if t == "li" else text))
+    if t == "quote":
+        wrap = QFrame()
+        wrap.setObjectName("Quote")
+        lay = QHBoxLayout(wrap)
+        lay.setContentsMargins(16, 0, 0, 0)
+        lay.addWidget(lab)
+        wrap.label = lab
+        return wrap
+    return lab
 
 
 class ReaderView(QWidget):
@@ -152,9 +98,7 @@ class ReaderView(QWidget):
         super().__init__()
         self.c = controller
         self.article: dict | None = None
-        self.blocks: list[dict] = []
-        self.block_widgets: dict[int, BlockWidget] = {}
-        self.mode = "ru"
+        self.shown: list[dict] = []          # блоки на экране
         self.active_ms = 0
         self.max_scroll = 0.0
         self.opened_at = 0.0
@@ -181,7 +125,7 @@ class ReaderView(QWidget):
         self.tick = QTimer(self)
         self.tick.timeout.connect(self._tick)
         self.tick.start(1000)
-        for keys, fn in (("Escape", self.back.emit), ("O", self.toggle_mode), ("S", self.toggle_save),
+        for keys, fn in (("Escape", self.back.emit), ("S", self.toggle_save),
                          ("L", lambda: self._key_react("like")), ("D", lambda: self._key_react("dislike")),
                          ("F", lambda: self._key_react("follow"))):
             sc = QShortcut(QKeySequence(keys), self)
@@ -201,8 +145,6 @@ class ReaderView(QWidget):
         self.back_btn = back
         self.top_meta = QLabel("")
         self.top_meta.setObjectName("Meta")
-        self.seg = W.Segmented(["Перевод", "Оригинал"])
-        self.seg.changed.connect(lambda i: self.set_mode("orig" if i == 1 else "ru"))
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setCheckable(True)
         self.save_btn.setCursor(Qt.PointingHandCursor)
@@ -215,41 +157,47 @@ class ReaderView(QWidget):
         lay.addStretch(1)
         lay.addWidget(self.top_meta)
         lay.addStretch(1)
-        lay.addWidget(self.seg)
-        lay.addSpacing(8)
         lay.addWidget(self.save_btn)
         lay.addWidget(more)
         return bar
 
     # ------------------------------------------------------------- открыть статью
+    def _russian_blocks(self, a: dict) -> tuple[list[dict], bool]:
+        """(блоки для показа, нужен ли перевод)."""
+        st = self.c.storage
+        if a.get("lang") == "ru":
+            return [dict(b, text=b["text_orig"]) for b in st.blocks(a["id"])], False
+        ru = st.ru_blocks(a["id"])
+        if ru and a.get("translate_status") == "done":
+            return ru, False
+        legacy = st.blocks(a["id"])            # статьи, переведённые старым способом (абзац в абзац)
+        text = [b for b in legacy if b["type"] in TEXT_TYPES]
+        if text and all(b["text_ru"] for b in text):
+            return [dict(b, text=b["text_ru"] if b["type"] in TEXT_TYPES else b["text_orig"]) for b in legacy], False
+        can = a.get("extract_status") == "ok" and bool(text)
+        return (ru if can else []), can
+
     def open(self, article_id: int) -> None:
         self.close_session()
         a = self.c.storage.article(article_id)
         if not a:
             return
         self.article = a
-        self.blocks = self.c.storage.blocks(article_id)
-        self.mode = "ru"
         self.active_ms = 0
         self.max_scroll = 0.0
         self.opened_at = time.time()
         self.c.storage.log_event(article_id, "open")
-        self.seg.buttons[0].setChecked(True)
-        self.seg.setVisible(a.get("lang") != "ru" and bool(self.blocks))
         self.save_btn.setChecked(bool(a.get("saved")))
         self.save_btn.setText("Сохранено" if a.get("saved") else "Сохранить")
-        self._build()
+        blocks, need = self._russian_blocks(a)
+        self.translating = need
+        self._build([] if need else blocks)
         self.area.verticalScrollBar().setValue(0)
         QTimer.singleShot(50, self._restore_position)
-        need = a.get("lang") != "ru" and a.get("extract_status") == "ok" and a.get("translate_status") != "done" \
-            and any(b["type"] in ("p", "h2", "h3", "li", "quote", "table") and not b["text_ru"] for b in self.blocks)
         if need:
-            self.translating = True
-            self.translate_label.setText("Переводится…")
-            self.translate_label.show()
+            self.status.setText("Claude переводит статью — абзацы появятся здесь через несколько секунд…")
+            self.status.show()
             self.c.translate(article_id, self._on_block, self._on_translated, self._on_progress)
-        else:
-            self.translating = False
 
     def _restore_position(self) -> None:
         pos = float((self.article or {}).get("read_pos") or 0)
@@ -257,7 +205,7 @@ class ReaderView(QWidget):
         if 0.05 < pos < 0.95 and sb.maximum() > 0:
             sb.setValue(int(pos * sb.maximum()))
 
-    def _build(self) -> None:
+    def _build(self, blocks: list[dict]) -> None:
         a = self.article
         body = QWidget()
         row = QHBoxLayout(body)
@@ -284,49 +232,11 @@ class ReaderView(QWidget):
         title.setWordWrap(True)
         title.setTextInteractionFlags(Qt.TextSelectableByMouse)
         col.addWidget(title)
-        if a.get("title_orig") and a.get("lang") != "ru":
-            orig = QLabel(a["title_orig"])
-            orig.setObjectName("Caption")
-            orig.setWordWrap(True)
-            col.addWidget(orig)
         bullets = a.get("summary_ru") or []
         if bullets:
-            short = W.Card("", "", padding=16)
-            head = QHBoxLayout()
-            lab = QLabel("КОРОТКО")
-            lab.setObjectName("SectionLabel")
-            head.addWidget(lab)
-            head.addStretch(1)
-            toggle = QPushButton("Свернуть" if not self.c.settings.get("ui.short_collapsed") else "Показать")
-            toggle.setObjectName("Link")
-            toggle.setCursor(Qt.PointingHandCursor)
-            head.addWidget(toggle)
-            short.add_layout(head)
-            items = []
-            for b in bullets:
-                bl = QLabel("•  " + b)
-                bl.setObjectName("Soft")
-                bl.setWordWrap(True)
-                short.add(bl)
-                items.append(bl)
-            if a.get("why_ru"):
-                why = QLabel("Почему вам: " + a["why_ru"])
-                why.setObjectName("Muted")
-                why.setWordWrap(True)
-                short.add(why)
-                items.append(why)
-
-            def flip():
-                hidden = not self.c.settings.get("ui.short_collapsed")
-                self.c.settings.set("ui.short_collapsed", hidden)
-                for w in items:
-                    w.setVisible(not hidden)
-                toggle.setText("Показать" if hidden else "Свернуть")
-            toggle.clicked.connect(flip)
-            for w in items:
-                w.setVisible(not self.c.settings.get("ui.short_collapsed"))
-            col.addWidget(short)
-        if not self.blocks or a.get("extract_status") in ("paywall", "captcha", "failed", "short"):
+            col.addWidget(self._short(bullets, a.get("why_ru", "")))
+        if a.get("extract_status") in ("paywall", "captcha", "failed", "short") or \
+                (not blocks and not self.translating):
             note = {"paywall": "Полный текст доступен только по подписке на сайте.",
                     "captcha": "Сайт закрыт проверкой на робота — полный текст не получен.",
                     "short": "Текста статьи почти нет — возможно, это видео или галерея."}.get(
@@ -340,32 +250,27 @@ class ReaderView(QWidget):
             site.setCursor(Qt.PointingHandCursor)
             site.clicked.connect(lambda: self.c.open_url(a["url"]))
             col.addWidget(site, 0, Qt.AlignLeft)
-        self.block_widgets.clear()
+        elif a.get("lang") != "ru" and is_condensed(a):
+            hint = QLabel("Длинный материал — здесь сжатый пересказ со всеми главными фактами. "
+                          "Полностью — «Открыть на сайте» в меню ⋯.")
+            hint.setObjectName("Hint")
+            hint.setWordWrap(True)
+            col.addWidget(hint)
+        # текст статьи: свой контейнер, чтобы абзацы можно было дописывать по мере перевода
+        self.text_box = QWidget()
+        self.text_lay = QVBoxLayout(self.text_box)
+        self.text_lay.setContentsMargins(0, 0, 0, 0)
+        self.text_lay.setSpacing(16)
+        col.addWidget(self.text_box)
+        self.shown = []
         self.image_labels.clear()
-        translating_soon = a.get("lang") != "ru" and a.get("translate_status") != "done"
-        for b in self.blocks:
-            if b["type"] == "img":
-                if not b.get("src"):
-                    continue
-                img = QLabel()
-                img.setAlignment(Qt.AlignCenter)
-                img.setMinimumHeight(40)
-                col.addWidget(img)
-                if b.get("text_orig"):
-                    cap = QLabel(b.get("text_ru") or b["text_orig"])
-                    cap.setObjectName("Caption")
-                    cap.setWordWrap(True)
-                    col.addWidget(cap)
-                self.image_labels[b["src"]] = img
-                self.images.fetch(b["src"])
-                continue
-            w = BlockWidget(b, self.mode, translating_soon)
-            self.block_widgets[b["idx"]] = w
-            col.addWidget(w)
-        self.translate_label = QLabel("")
-        self.translate_label.setObjectName("Hint")
-        self.translate_label.hide()
-        col.addWidget(self.translate_label)
+        for b in blocks:
+            self._add_block(b)
+        self.status = QLabel("")
+        self.status.setObjectName("Hint")
+        self.status.setWordWrap(True)
+        self.status.hide()
+        col.addWidget(self.status)
         col.addSpacing(10)
         col.addWidget(W.divider())
         col.addLayout(self._reactions())
@@ -380,8 +285,7 @@ class ReaderView(QWidget):
         col.addWidget(self.answer)
         similar = self.c.similar(a)
         if similar:
-            from .widgets import Group
-            g = Group("Похожее")
+            g = W.Group("Похожее")
             for it in similar:
                 b = QPushButton(it.article.get("title_ru") or it.article.get("title_orig") or "")
                 b.setObjectName("Link")
@@ -393,6 +297,67 @@ class ReaderView(QWidget):
         col.addStretch(1)
         self.area.setWidget(body)
         self._update_meta()
+
+    def _short(self, bullets: list[str], why: str) -> QWidget:
+        short = W.Card("", "", padding=16)
+        head = QHBoxLayout()
+        lab = QLabel("КОРОТКО")
+        lab.setObjectName("SectionLabel")
+        head.addWidget(lab)
+        head.addStretch(1)
+        toggle = QPushButton("Свернуть" if not self.c.settings.get("ui.short_collapsed") else "Показать")
+        toggle.setObjectName("Link")
+        toggle.setCursor(Qt.PointingHandCursor)
+        head.addWidget(toggle)
+        short.add_layout(head)
+        items = []
+        for b in bullets:
+            bl = QLabel("•  " + b)
+            bl.setObjectName("Soft")
+            bl.setWordWrap(True)
+            short.add(bl)
+            items.append(bl)
+        if why:
+            w = QLabel("Почему вам: " + why)
+            w.setObjectName("Muted")
+            w.setWordWrap(True)
+            short.add(w)
+            items.append(w)
+
+        def flip():
+            hidden = not self.c.settings.get("ui.short_collapsed")
+            self.c.settings.set("ui.short_collapsed", hidden)
+            for x in items:
+                x.setVisible(not hidden)
+            toggle.setText("Показать" if hidden else "Свернуть")
+        toggle.clicked.connect(flip)
+        for x in items:
+            x.setVisible(not self.c.settings.get("ui.short_collapsed"))
+        return short
+
+    def _clear_body(self) -> None:
+        while self.text_lay.count():
+            w = self.text_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        self.shown = []
+        self.image_labels.clear()
+
+    def _add_block(self, b: dict) -> None:
+        if b["type"] == "img":
+            if not b.get("src"):
+                return
+            img = QLabel()
+            img.setAlignment(Qt.AlignCenter)
+            img.setMinimumHeight(40)
+            self.text_lay.addWidget(img)
+            self.image_labels[b["src"]] = img
+            self.images.fetch(b["src"])
+        elif (b.get("text") or "").strip():
+            self.text_lay.addWidget(block_label(b))
+        else:
+            return
+        self.shown.append(b)
 
     def _reactions(self) -> QHBoxLayout:
         a = self.article
@@ -454,7 +419,7 @@ class ReaderView(QWidget):
         row.addWidget(q)
         row.addStretch(1)
         stars = []
-        for i in range(1, 6):
+        for _i in range(1, 6):
             s = QPushButton("★")
             s.setObjectName("Star")
             s.setCheckable(True)
@@ -523,42 +488,32 @@ class ReaderView(QWidget):
         self.back.emit()
 
     # ------------------------------------------------------------- перевод
-    def _on_block(self, idx: int, text: str) -> None:
-        w = self.block_widgets.get(idx)
-        if w is not None and self.article:
-            w.set_translation(text)
+    def _on_block(self, block: dict) -> None:
+        if not self.article:
+            return
+        self.status.setText("Переводится…")
+        self._add_block(block)
         self._update_meta()
 
     def _on_progress(self, msg: str) -> None:
-        self.translate_label.setText(msg)
+        self.status.setText(msg)
 
     def _on_translated(self, res: dict) -> None:
         self.translating = False
-        if self.article:                     # подтянуть всё, что записал перевод (и то, что не переводится)
-            fresh = {b["idx"]: b["text_ru"] for b in self.c.storage.blocks(self.article["id"])}
-            for idx, w in self.block_widgets.items():
-                if fresh.get(idx):
-                    w.block["text_ru"] = fresh[idx]
-            self.article["translate_status"] = res.get("status", self.article.get("translate_status"))
+        if not self.article:
+            return
+        self.article["translate_status"] = {"done": "done", "partial": "partial"}.get(res.get("status"), "none")
         if res.get("status") == "done":
-            self.translate_label.hide()
+            self.status.hide()
+            # в потоке абзацы могли прийти не все — показываем то, что сохранено
+            saved = self.c.storage.ru_blocks(self.article["id"])
+            if len(saved) != len(self.shown):
+                self._clear_body()
+                for b in saved:
+                    self._add_block(b)
         else:
-            self.translate_label.setText(res.get("message", ""))
-            self.translate_label.show()
-        for w in self.block_widgets.values():
-            w.render(False)
-
-    def set_mode(self, mode: str) -> None:
-        self.mode = mode
-        for w in self.block_widgets.values():
-            w.mode = mode
-            w.render(self.translating)
-
-    def toggle_mode(self) -> None:
-        if self.seg.isVisible():
-            i = 0 if self.mode == "orig" else 1
-            self.seg.buttons[i].setChecked(True)
-            self.set_mode("orig" if i == 1 else "ru")
+            self.status.setText(res.get("message", ""))
+            self.status.show()
 
     def toggle_save(self) -> None:
         if not self.article:
@@ -594,7 +549,7 @@ class ReaderView(QWidget):
         a = self.article
         if not a:
             return
-        words = int(a.get("words") or 0)
+        words = self._words()
         left = ""
         if words:
             sb = self.area.verticalScrollBar()
@@ -602,6 +557,11 @@ class ReaderView(QWidget):
             mins = max(0, round(expected_ms(int(words * (1 - pos))) / 60000))
             left = "дочитано" if pos >= 0.97 else f"осталось {max(1, mins)} мин"
         self.top_meta.setText("  ·  ".join(x for x in (a.get("source") or a.get("domain", ""), left) if x))
+
+    def _words(self) -> int:
+        """Слов в том, что человек читает (пересказ короче оригинала)."""
+        n = sum(words_count(b.get("text") or "") for b in self.shown if b["type"] in TEXT_TYPES)
+        return n or int((self.article or {}).get("words") or 0)
 
     def _tick(self) -> None:
         if not self.article or not self.isVisible():
@@ -617,9 +577,8 @@ class ReaderView(QWidget):
         a = self.article
         if not a:
             return
-        words = int(a.get("words") or 0) or words_count(" ".join(b["text_orig"] for b in self.blocks))
-        exp = expected_ms(words)
+        exp = expected_ms(self._words())
         sb = self.area.verticalScrollBar()
         pos = sb.value() / sb.maximum() if sb.maximum() > 0 else 0.0
-        self.c.finish_read(a["id"], self.active_ms, self.max_scroll, exp, self.mode, pos)
+        self.c.finish_read(a["id"], self.active_ms, self.max_scroll, exp, "ru", pos)
         self.article = None

@@ -37,12 +37,14 @@ def stems(text: str) -> list[str]:
     return [s for s in (stem(w) for w in _WORD.findall(text or "")) if s]
 
 
-def index_text(article: dict, blocks: list[dict]) -> str:
+def index_text(article: dict, blocks: list[dict], ru_blocks: list[dict] | None = None) -> str:
     parts = [article.get("title_ru", ""), article.get("title_orig", ""), " ".join(article.get("summary_ru") or []),
              article.get("topic", ""), article.get("subtopic", ""), " ".join(article.get("entities") or [])]
     for b in blocks:
         parts.append(b.get("text_ru") or "")
         parts.append(b.get("text_orig") or b.get("text") or "")
+    for b in ru_blocks or []:
+        parts.append(b.get("text") or "")
     return " ".join(stems(" ".join(parts)))
 
 
@@ -61,7 +63,7 @@ def reindex(storage, article_id: int) -> None:
     a = storage.article(article_id)
     if not a:
         return
-    storage.index_article(article_id, index_text(a, storage.blocks(article_id)))
+    storage.index_article(article_id, index_text(a, storage.blocks(article_id), storage.ru_blocks(article_id)))
 
 
 def _fts_query(query: str) -> str:
@@ -107,6 +109,7 @@ def snippet(storage, article: dict, query: str, width: int = 220) -> str:
     """Фрагмент с совпадением: «…слова <b>совпадение</b> слова…»."""
     want = set(stems(query))
     texts = [" ".join(article.get("summary_ru") or [])]
+    texts += [b.get("text") or "" for b in storage.ru_blocks(article["id"])]
     texts += [b.get("text_ru") or b.get("text_orig") or "" for b in storage.blocks(article["id"])]
     for text in texts:
         words = list(_WORD.finditer(text))

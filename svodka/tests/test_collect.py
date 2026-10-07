@@ -142,66 +142,69 @@ def _article_with_blocks(storage, n=6):
     aid = storage.add_article({"url": "https://t.example/x", "title_orig": "Title", "lang": "en",
                                "extract_status": "ok"})
     blocks = [{"type": "p", "text": f"Paragraph {i} mentions 2026 and {i * 10 + 15} percent."} for i in range(n)]
-    blocks.insert(2, {"type": "code", "text": "print('keep')"})
+    blocks.insert(1, {"type": "h2", "text": "Section"})
+    blocks.insert(3, {"type": "code", "text": "print('keep')"})
+    blocks.insert(4, {"type": "img", "text": "chart", "src": "https://t.example/c.png"})
     storage.set_blocks(aid, blocks)
     return aid
 
 
-def test_translation_streams_every_block(env):
+def test_translation_streams_russian_text(env):
+    """Один вызов на статью, ответ простым текстом; код и картинки возвращаются по меткам без пересылки."""
     settings, storage, _db = env
     aid = _article_with_blocks(storage)
     seen = []
-    res = translate.translate_article(settings, storage, aid, on_block=lambda i, t: seen.append(i))
+    res = translate.translate_article(settings, storage, aid, on_block=seen.append)
     assert res["status"] == "done"
-    blocks = storage.blocks(aid)
-    assert all(b["text_ru"] for b in blocks)
-    assert blocks[2]["text_ru"] == "print('keep')"             # код не переводится
-    assert len(seen) == 6
+    ru = storage.ru_blocks(aid)
+    assert [b["type"] for b in ru] == ["p", "h2", "p", "code", "img", "p", "p", "p", "p"]
+    assert ru[1]["text"].startswith("Русский перевод") and ru[3]["text"] == "print('keep')"
+    assert ru[4]["src"] == "https://t.example/c.png"
+    assert len(seen) == len(ru)                                 # абзацы пришли потоком
     assert storage.article(aid)["translate_status"] == "done"
+    assert search.search(storage, "перевод")                     # русский текст ищется
 
 
-def test_translation_retries_missing_blocks(env, monkeypatch):
+def test_translation_source_has_no_code(env):
+    """Экономия: код и картинки в Claude не отправляются — только метки."""
+    _settings, storage, _db = env
+    aid = _article_with_blocks(storage)
+    text = translate.source_text(storage.blocks(aid))
+    assert "print('keep')" not in text and "[[code 3]]" in text and "[[img 4]]" in text and "## Section" in text
+
+
+def test_translation_interrupted_by_limit_is_partial(env, monkeypatch):
     settings, storage, _db = env
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "partial")
-    aid = _article_with_blocks(storage, n=9)
+    aid = _article_with_blocks(storage, n=8)
     res = translate.translate_article(settings, storage, aid)
-    done = [b for b in storage.blocks(aid) if b["type"] == "p" and b["text_ru"]]
-    assert len(done) > 6                                      # второй заход добрал часть пропусков
-    assert res["status"] in ("done", "partial")
+    assert res["status"] == "partial" and res["error_kind"] == "limit"
+    assert 0 < len(storage.ru_blocks(aid)) < 10
+    assert storage.article(aid)["translate_status"] == "partial"   # при открытии переведётся заново
 
 
-def test_translation_rejects_garbage(env, monkeypatch):
+def test_translation_rejects_non_russian(env, monkeypatch):
     settings, storage, _db = env
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "garbage")
     aid = _article_with_blocks(storage)
-    translate.translate_article(settings, storage, aid)
-    assert not any(b["text_ru"] for b in storage.blocks(aid) if b["type"] == "p")
+    res = translate.translate_article(settings, storage, aid)
+    assert res["status"] == "failed" and not storage.ru_blocks(aid)
 
 
-def test_prefetch_stops_on_limit_and_repeated_failures(env, monkeypatch):
-    """Перевод заранее не должен выжигать лимит подписки: лимит — сразу стоп, иначе — после двух неудач."""
+def test_long_article_is_condensed(env):
     settings, storage, _db = env
-    calls = []
-
-    def fake_translate(_s, _st, aid, **_k):
-        calls.append(aid)
-        return {"status": "failed", "message": "не вышло", "error_kind": kind}
-    monkeypatch.setattr(translate, "translate_article", fake_translate)
-    for i in range(5):
-        aid = storage.add_article({"url": f"https://t.example/p{i}", "title_ru": f"Статья {i}", "lang": "en",
-                                   "extract_status": "ok", "topic": "ИИ: развитие", "summary_ru": ["ф"]})
-        storage.set_blocks(aid, [{"type": "p", "text": "Some text"}])
-    kind = "limit"
-    assert translate.prefetch(settings, storage, 5) == 0 and len(calls) == 1
-    calls.clear()
-    kind = "failed"
-    assert translate.prefetch(settings, storage, 5) == 0 and len(calls) == 2
+    aid = _article_with_blocks(storage, n=4)
+    storage.update_article(aid, words=translate.LONG_WORDS + 1)
+    assert translate.is_condensed(storage.article(aid))
 
 
-def test_translation_check_numbers():
-    assert translate.check_block("In 2026, 37 percent", "В 2026 году 37 процентов")
-    assert not translate.check_block("In 2026, 37 percent", "В этом году треть")
-    assert translate.check_block("One of 3 things", "Одна из трёх вещей")
+def test_builder_parses_markdown_tables_and_lists():
+    out = []
+    b = translate.Builder({}, out.append)
+    b.feed("## Итоги\n\n| Модель | Балл |\n|---|---|\n| A | 81 |\n\n- пункт\n> цитата\nабзац **жирный**")
+    b.flush()
+    assert [(x["type"], x["text"]) for x in out] == [("h2", "Итоги"), ("table", "Модель | Балл\nA | 81"),
+                                                     ("li", "пункт"), ("quote", "цитата"), ("p", "абзац жирный")]
 
 
 # ---------------------------------------------------------------- извлечение

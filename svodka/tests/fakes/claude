@@ -61,17 +61,34 @@ if system_file.endswith("ask.md"):
     result("Ответ по статье: " + data.get("вопрос", ""))
     sys.exit(0)
 
+_LAT = "abcdefghijklmnopqrstuvwxyz"
+_CYR = "абцдефгхийклмнопкрстувшксз"
+TO_CYR = str.maketrans(_LAT + _LAT.upper(), _CYR + _CYR.upper())
+
 if system_file.endswith("translate.md"):
+    # Редакторский перевод: простой текст, абзац — строка; метки [[img N]] / [[code N]] переносятся как есть.
     data = json.loads(sys.stdin.read() or "{}")
-    blocks = data.get("блоки") or []
-    for k, b in enumerate(blocks):
-        if MODE == "partial" and k % 3 == 2:
-            continue
-        line = "это не JSON, а болтовня модели" if MODE == "garbage" else \
-            json.dumps({"id": b["id"], "ru": "Перевод: " + b["text"]}, ensure_ascii=False)
-        for piece in (line[: len(line) // 2], line[len(line) // 2:] + "\n"):
+    lines = [ln for ln in (data.get("текст") or "").split("\n") if ln.strip()]
+    out = []
+    for ln in lines:
+        if ln.startswith("[["):
+            out.append(ln)
+        elif MODE == "garbage":
+            out.append("Sure! Here is the translation you asked for.")
+        else:
+            prefix = next((p for p in ("### ", "## ", "- ", "> ") if ln.startswith(p)), "")
+            # «перевод»: латиница → кириллица по звучанию, цифры на месте (как в настоящем переводе)
+            out.append(prefix + "Русский перевод: " + ln[len(prefix):].translate(TO_CYR))
+    if MODE == "partial":
+        out = out[: max(1, len(out) // 2)]
+    for ln in out:
+        text = ln + "\n\n"
+        for piece in (text[: len(text) // 2], text[len(text) // 2:]):
             emit({"type": "stream_event", "event": {"type": "content_block_delta",
                                                     "delta": {"type": "text_delta", "text": piece}}})
+    if MODE == "partial":
+        result("Claude AI usage limit reached|resets 7pm", is_error=True)
+        sys.exit(1)
     result("")
     sys.exit(0)
 

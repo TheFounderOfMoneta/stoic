@@ -1,12 +1,14 @@
-"""Полный перевод статьи на русский — блоками, потоком, с проверкой.
+"""Статья по-русски — одним вызовом Claude, как её написал бы русский журналист.
 
-- Облегчённый вызов Claude: свой короткий системный промпт и никаких инструментов —
-  большой промпт Claude Code и инструменты не тратят лимиты Pro.
-- Блоки идут с номерами; ответ — по строке JSON на блок, поэтому Читалка показывает
-  перевод абзац за абзацем, пока он генерируется.
-- Проверка: все номера на месте, цифры не потерялись. Пропущенное переводится повторно.
-- Длинные статьи — частями (~1500 слов); словарь терминов читателя применяется всегда.
-- Перевод хранится, пока хранится статья, и не делается дважды.
+Не подстрочник «абзац в абзац», а редакторский перевод: естественный русский без калек и
+американских оборотов, без служебного мусора сайтов и рассылок, все факты, цифры и имена на месте.
+Длинные материалы (больше ~2500 слов) — сжатым пересказом: читать быстрее, лимитов уходит меньше.
+
+Экономия лимитов подписки:
+- один вызов на статью (не частями), свой короткий системный промпт, без инструментов;
+- ответ — простой текст, а не JSON (меньше выходных токенов — они самые дорогие);
+- код и картинки не пересылаются: в тексте только метки [[img 3]] / [[code 5]].
+Текст приходит потоком — Читалка показывает абзацы по мере готовности.
 """
 from __future__ import annotations
 
@@ -22,8 +24,11 @@ from .util import words_count
 
 log = logging.getLogger(__name__)
 
-TRANSLATABLE = ("p", "h2", "h3", "li", "quote", "table")
-_DIGITS = re.compile(r"\d+")
+TEXT_TYPES = ("p", "h2", "h3", "li", "quote", "table")
+LONG_WORDS = 2500           # длиннее — сжатый пересказ
+_MARK = re.compile(r"^\[\[(img|code) (\d+)\]\]$")
+_CYR = re.compile(r"[А-Яа-яЁё]")
+_LAT = re.compile(r"[A-Za-z]")
 _locks: dict[int, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
@@ -38,46 +43,49 @@ def needs_translation(article: dict) -> bool:
         and article.get("translate_status") not in ("done", "not_needed")
 
 
-def check_block(orig: str, ru: str) -> bool:
-    """Перевод правдоподобен: не пустой, числа на месте, длина в разумных пределах.
-
-    Проверяем числа из 2–4 цифр (годы, проценты, суммы): их нельзя потерять. Однозначные могут
-    быть написаны словами, а большие — переформатированы («1,000,000» → «1 млн»).
-    """
-    if not ru or not ru.strip():
-        return False
-    letters = sum(ch.isalpha() for ch in orig or "")
-    if len(orig or "") < 60 and letters < len(orig or "") * 0.35:
-        return True             # строка-дата или цифры: модель могла переписать её по-русски
-    want = {n.lstrip("0") for n in _DIGITS.findall(orig or "") if 2 <= len(n) <= 4} - {""}
-    compact = ru.replace(chr(0xA0), "").replace(" ", "")
-    have = {n.lstrip("0") for n in _DIGITS.findall(compact)}
-    if want - have:
-        return False
-    ratio = len(ru) / max(1, len(orig))
-    return 0.35 <= ratio <= 3.5 or len(orig) < 40
+def is_condensed(article: dict) -> bool:
+    return int(article.get("words") or 0) > LONG_WORDS
 
 
-def chunks(blocks: list[dict], max_words: int) -> list[list[dict]]:
-    out, cur, n = [], [], 0
+def source_text(blocks: list[dict]) -> str:
+    """Оригинал для Claude: простая разметка, код и картинки — метками."""
+    out = []
     for b in blocks:
-        w = words_count(b["text_orig"])
-        if cur and n + w > max_words:
-            out.append(cur)
-            cur, n = [], 0
-        cur.append(b)
-        n += w
-    if cur:
-        out.append(cur)
-    return out
+        t, text = b["type"], (b.get("text_orig") or b.get("text") or "").strip()
+        if t == "img":
+            if b.get("src"):
+                out.append(f"[[img {b['idx']}]]")
+        elif t == "code":
+            out.append(f"[[code {b['idx']}]]")
+        elif not text:
+            continue
+        elif t == "h2":
+            out.append("## " + text)
+        elif t == "h3":
+            out.append("### " + text)
+        elif t == "li":
+            out.append("- " + text)
+        elif t == "quote":
+            out.append("> " + text)
+        elif t == "table":
+            out.append("\n".join("| " + row + " |" for row in text.split("\n")))
+        else:
+            out.append(text)
+    return "\n\n".join(out)
 
 
-class _LineParser:
-    """Собирает поток текста в строки JSON {"id", "ru"}."""
+class Builder:
+    """Поток текста от Claude → блоки русского текста (по одной строке на абзац)."""
 
-    def __init__(self, on_item: Callable[[int, str], None]):
+    def __init__(self, originals: dict[int, dict], emit: Callable[[dict], None]):
+        self.originals = originals
+        self.emit = emit
         self.buf = ""
-        self.on_item = on_item
+        self.table: list[str] = []
+        self.count = 0
+        self.text_chars = 0
+        self.cyr_chars = 0
+        self.used_marks: set[int] = set()
 
     def feed(self, text: str) -> None:
         self.buf += text
@@ -89,25 +97,56 @@ class _LineParser:
         if self.buf.strip():
             self._line(self.buf)
         self.buf = ""
+        self._flush_table()
+
+    def _out(self, kind: str, text: str, src: str | None = None) -> None:
+        if kind not in ("img", "code"):
+            self.text_chars += len(_CYR.findall(text)) + len(_LAT.findall(text))
+            self.cyr_chars += len(_CYR.findall(text))
+        self.emit({"idx": self.count, "type": kind, "text": text, "src": src})
+        self.count += 1
+
+    def _flush_table(self) -> None:
+        if self.table:
+            self._out("table", "\n".join(self.table))
+            self.table = []
 
     def _line(self, line: str) -> None:
-        line = line.strip().strip(",")
-        if not line.startswith("{"):
+        line = line.strip()
+        if not line:
             return
-        try:
-            item = json.loads(line)
-        except ValueError:
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if not all(set(c) <= set("-: ") for c in cells):       # строка-разделитель markdown
+                self.table.append(" | ".join(cells))
             return
-        if isinstance(item, dict) and isinstance(item.get("ru"), str):
-            try:
-                self.on_item(int(item.get("id")), item["ru"])
-            except (TypeError, ValueError):
-                pass
+        self._flush_table()
+        m = _MARK.match(line)
+        if m:
+            idx = int(m.group(2))
+            orig = self.originals.get(idx)
+            if orig is not None and idx not in self.used_marks:
+                self.used_marks.add(idx)
+                self._out(orig["type"], orig.get("text_orig") or "", orig.get("src"))
+            return
+        if line.startswith("### "):
+            self._out("h3", line[4:].strip())
+        elif line.startswith("## ") or line.startswith("# "):
+            self._out("h2", line.lstrip("#").strip())
+        elif line[:2] in ("- ", "• ", "* "):
+            self._out("li", line[2:].strip())
+        elif line.startswith(">"):
+            self._out("quote", line.lstrip("> ").strip())
+        else:
+            self._out("p", line.replace("**", ""))
+
+    def russian(self) -> bool:
+        return self.count > 0 and self.cyr_chars >= 0.4 * max(1, self.text_chars)
 
 
-def translate_article(settings, storage, article_id: int, on_block: Callable[[int, str], None] | None = None,
+def translate_article(settings, storage, article_id: int, on_block: Callable[[dict], None] | None = None,
                       on_progress: Callable[[str], None] | None = None, cancel=None) -> dict:
-    """Перевести недостающие блоки статьи. {'status': done|partial|skipped|failed, 'message'}."""
+    """Статья по-русски. {'status': done|partial|failed|skipped|busy, 'message', 'error_kind'?}."""
     lock = _article_lock(article_id)
     if not lock.acquire(blocking=False):
         return {"status": "busy", "message": "Перевод уже идёт."}
@@ -125,68 +164,60 @@ def _translate(settings, storage, article_id, on_block, on_progress, cancel) -> 
         storage.update_article(article_id, translate_status="not_needed")
         return {"status": "skipped", "message": "Статья на русском."}
     blocks = storage.blocks(article_id)
-    for b in blocks:                       # код и картинки не переводятся
-        if b["type"] not in TRANSLATABLE and not b["text_ru"]:
-            storage.set_block_ru(article_id, b["idx"], b["text_orig"])
-    todo = [b for b in blocks if b["type"] in TRANSLATABLE and not b["text_ru"]]
-    if not todo:
-        storage.update_article(article_id, translate_status="done")
-        return {"status": "done", "message": "Перевод готов."}
+    if not any(b["type"] in TEXT_TYPES and b["text_orig"].strip() for b in blocks):
+        return {"status": "failed", "message": "Текста статьи нет."}
     ensure_dirs()
-    glossary = storage.glossary()
-    total = len(todo)
-    done = 0
+    words = sum(words_count(b["text_orig"]) for b in blocks if b["type"] in TEXT_TYPES)
+    condensed = words > LONG_WORDS
+    payload = {"заголовок": article.get("title_orig") or article.get("title_ru"),
+               "источник": article.get("source") or article.get("domain", ""),
+               "режим": "сжатый пересказ" if condensed else "полный перевод",
+               "словарь терминов": storage.glossary(), "текст": source_text(blocks)}
+    storage.clear_ru_blocks(article_id)
+
+    def emit(b: dict) -> None:
+        storage.add_ru_block(article_id, b["idx"], b["type"], b["text"], b.get("src"))
+        if on_block:
+            on_block(b)
+        if on_progress and b["idx"] % 3 == 0:
+            on_progress(f"Переводится… абзацев: {b['idx'] + 1}")
+
+    builder = Builder({b["idx"]: b for b in blocks}, emit)
     error: claude_cli.ClaudeError | None = None
-    for attempt in range(2):
-        for part in chunks(todo, int(settings.get("translate.chunk_words", 1500))):
-            by_id = {b["idx"]: b for b in part}
-
-            def accept(idx: int, ru: str, by_id=by_id) -> None:
-                nonlocal done
-                b = by_id.get(idx)
-                if b is None or b.get("_done"):
-                    return
-                if not check_block(b["text_orig"], ru):
-                    return
-                b["_done"] = True
-                storage.set_block_ru(article_id, idx, ru.strip())
-                done += 1
-                if on_block:
-                    on_block(idx, ru.strip())
-                if on_progress:
-                    on_progress(f"Переводится… {done} из {total}")
-
-            payload = {"заголовок": article.get("title_orig") or article.get("title_ru"),
-                       "источник": article.get("source", ""), "словарь терминов": glossary,
-                       "блоки": [{"id": b["idx"], "type": b["type"], "text": b["text_orig"]} for b in part]}
-            parser = _LineParser(accept)
-            try:
-                res = claude_cli.run(
-                    "Переведи блоки статьи из входных данных по правилам. Только строки JSON.",
-                    ["--system-prompt-file", str(PROMPTS_DIR / "translate.md"), "--tools", "",
-                     "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-                     "--model", settings.get("translate.model", "sonnet"),
-                     "--include-partial-messages", "--max-turns", "2", "--no-session-persistence"],
-                    command=settings.get("claude.command", "claude"),
-                    stdin=json.dumps(payload, ensure_ascii=False), on_text=parser.feed, cwd=str(RUNTIME_DIR),
-                    timeout=600, cancel=cancel)
-                parser.flush()
-                for line in (res.text or "").splitlines():    # на случай, если поток не пришёл
-                    parser._line(line)
-            except claude_cli.ClaudeError as exc:
-                log.warning("перевод статьи %s: %s — %s", article_id, exc.kind, exc.message[:300])
-                error = exc
-                break
-        todo = [b for b in todo if not b.get("_done")]
-        if not todo or error is not None:
-            break
-    left = len([b for b in storage.blocks(article_id) if b["type"] in TRANSLATABLE and not b["text_ru"]])
-    status = "done" if left == 0 else ("partial" if done or total > left else "none")
-    storage.update_article(article_id, translate_status=status)
+    try:
+        res = claude_cli.run(
+            "Переведи статью из входных данных по правилам.",
+            ["--system-prompt-file", str(PROMPTS_DIR / "translate.md"), "--tools", "",
+             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+             "--model", settings.get("translate.model", "sonnet"),
+             "--include-partial-messages", "--max-turns", "2", "--no-session-persistence"],
+            command=settings.get("claude.command", "claude"),
+            stdin=json.dumps(payload, ensure_ascii=False), on_text=builder.feed, cwd=str(RUNTIME_DIR),
+            timeout=900, cancel=cancel)
+        builder.flush()
+        if builder.count == 0 and res.text:          # поток не пришёл — берём итоговый текст
+            builder.feed(res.text + "\n")
+            builder.flush()
+    except claude_cli.ClaudeError as exc:
+        log.warning("перевод статьи %s: %s — %s", article_id, exc.kind, exc.message[:300])
+        error = exc
+        builder.flush()
+    if builder.count and not builder.russian():
+        log.warning("перевод статьи %s: ответ не по-русски — отброшен", article_id)
+        storage.clear_ru_blocks(article_id)
+        storage.update_article(article_id, translate_status="none")
+        return {"status": "failed", "message": "Перевод не получился — попробую ещё раз при следующем открытии."}
+    if error is not None:
+        status = "partial" if builder.count else "none"
+        storage.update_article(article_id, translate_status=status)
+        return {"status": "partial" if builder.count else "failed", "message": error.human(),
+                "error_kind": error.kind}
+    if not builder.count:
+        storage.update_article(article_id, translate_status="none")
+        return {"status": "failed", "message": "Claude не вернул перевод."}
+    storage.update_article(article_id, translate_status="done")
     search.reindex(storage, article_id)
-    if error is not None and status != "done":
-        return {"status": "failed" if not done else "partial", "message": error.human(), "error_kind": error.kind}
-    return {"status": status, "message": "Перевод готов." if status == "done" else f"Не переведено блоков: {left}."}
+    return {"status": "done", "message": "Перевод готов.", "condensed": condensed}
 
 
 def prefetch(settings, storage, n: int, on_progress: Callable[[str], None] | None = None) -> int:

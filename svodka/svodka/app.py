@@ -474,8 +474,8 @@ class Controller(QObject):
             r = self.window.reader if self.window else None
             return bool(r and r.article and r.article.get("id") == aid)
 
-        def block(idx, text):
-            self.ui(lambda: current() and on_block(idx, text))
+        def block(b):
+            self.ui(lambda: current() and on_block(b))
 
         def progress(msg):
             self.ui(lambda: current() and on_progress(msg))
@@ -494,8 +494,12 @@ class Controller(QObject):
             return
         self.storage.log_event(aid, "ask", 1.0, meta=question[:500])
         self._changed()
-        blocks = self.storage.blocks(aid)
-        text = "\n\n".join((b["text_ru"] or b["text_orig"]) for b in blocks if b["type"] != "img")
+        ru = self.storage.ru_blocks(aid)
+        if ru:
+            text = "\n\n".join(b["text"] for b in ru if b["type"] != "img")
+        else:
+            text = "\n\n".join((b["text_ru"] or b["text_orig"]) for b in self.storage.blocks(aid)
+                                 if b["type"] != "img")
         words = text.split()
         if len(words) > 7000:
             text = " ".join(words[:7000]) + " …"
