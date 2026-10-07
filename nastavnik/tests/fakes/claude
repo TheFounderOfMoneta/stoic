@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""Поддельный `claude` для сценарных тестов (лимиты подписки не тратятся).
+
+Репетитор (--system-prompt-file …tutor.md): по-настоящему поднимает MCP-сервер «nastavnik» из
+--mcp-config и вызывает его инструменты так, как это делал бы Claude: начало сессии → крючок,
+ответ человека → record_attempt, «время заканчивать» → карточки, подарок, петля, checkpoint.
+Карта темы (new_topic.md, --json-schema) и собеседник (listener.md) — заготовленные ответы.
+Как настоящий Claude Code, пишет журнал разговора в ~/.claude/projects/<папка>/<id>.jsonl.
+
+FAKE_CLAUDE_MODE: ok | auth | limit | slow | nosession | broken
+FAKE_TOKENS: размер контекста, который сообщать (для проверки «новый разговор после лимита»)
+FAKE_DELAY_MS: пауза между кусками текста (проверка, что окно не замирает)
+"""
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+
+MODE = os.environ.get("FAKE_CLAUDE_MODE", "ok")
+DELAY = float(os.environ.get("FAKE_DELAY_MS", "0")) / 1000
+args = sys.argv[1:]
+
+
+def emit(obj):
+    print(json.dumps(obj, ensure_ascii=False), flush=True)
+
+
+def opt(name, default=None):
+    if name in args:
+        i = args.index(name)
+        return args[i + 1] if i + 1 < len(args) else default
+    return default
+
+
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": MODE != "auth", "authMethod": "claude.ai"}))
+    sys.exit(0)
+
+prompt = opt("-p", "") or ""
+resume = opt("--resume")
+system_file = opt("--system-prompt-file", "") or ""
+# Как настоящий Claude Code: без --resume берёт сессию из окружения родителя, если она там есть.
+session_id = resume or os.environ.get("CLAUDE_CODE_SESSION_ID") or str(uuid.uuid4())
+
+emit({"type": "system", "subtype": "init", "model": opt("--model", "sonnet"), "session_id": session_id})
+if MODE == "auth":
+    emit({"type": "result", "subtype": "error_during_execution", "is_error": True,
+          "result": "Invalid API key · Please run /login", "session_id": session_id})
+    sys.exit(1)
+if MODE == "limit":
+    emit({"type": "result", "subtype": "error_during_execution", "is_error": True,
+          "result": "Claude AI usage limit reached|resets 7pm", "session_id": session_id})
+    sys.exit(1)
+if MODE == "nosession" and resume:
+    print(f"No conversation found with session ID: {resume}", file=sys.stderr, flush=True)
+    sys.exit(1)
+if MODE == "broken":
+    print("это не JSON, а мусор", flush=True)
+    sys.exit(3)
+if MODE == "slow":
+    time.sleep(30)
+
+
+def transcript(role, text):
+    folder = Path.home() / ".claude" / "projects" / os.getcwd().replace("/", "-")
+    folder.mkdir(parents=True, exist_ok=True)
+    with open(folder / f"{session_id}.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps({"role": role, "text": text}, ensure_ascii=False) + "\n")
+
+
+def say(text):
+    """Текст потоком, как с --include-partial-messages, и итоговое сообщение с размером контекста."""
+    step = max(1, len(text) // 6)
+    for i in range(0, len(text), step):
+        emit({"type": "stream_event", "event": {"type": "content_block_delta",
+                                                "delta": {"type": "text_delta", "text": text[i:i + step]}}})
+        if DELAY:
+            time.sleep(DELAY)
+    tokens = int(os.environ.get("FAKE_TOKENS", "0") or 0) or (2000 + len(prompt))
+    emit({"type": "assistant", "message": {"content": [{"type": "text", "text": text}],
+                                           "usage": {"input_tokens": tokens - 200, "output_tokens": 200}}})
+
+
+def tool_use(name, inp):
+    emit({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}})
+
+
+def result(text="", structured=None):
+    ev = {"type": "result", "subtype": "success", "is_error": False, "result": text, "session_id": session_id,
+          "total_cost_usd": 0.01, "num_turns": 2}
+    if structured is not None:
+        ev["structured_output"] = structured
+    emit(ev)
+
+
+transcript("user", prompt)
+
+# ---------------------------------------------------------------- карта темы
+if system_file.endswith("new_topic.md"):
+    data = json.loads(sys.stdin.read() or "{}")
+    custom = os.environ.get("FAKE_STRUCTURED")
+    if custom:
+        result("", structured=json.loads(custom))
+        sys.exit(0)
+    title = data.get("тема", "Тема")
+    names = ["Основы", "Пакеты", "Адреса", "Маршруты", "Надёжная доставка"]
+    concepts = [{"slug": f"c{i}", "title": f"{n}", "summary": f"{n} в теме «{title}»",
+                 "kind": "procedure" if i == 3 else "concept", "prereqs": [f"c{i - 1}"] if i else [],
+                 "interest": 0.5} for i, n in enumerate(names)]
+    result("", structured={"concepts": concepts, "first_question": "Почему письмо доходит, даже если часть пути сломана?"})
+    sys.exit(0)
+
+# ---------------------------------------------------------------- собеседник
+if system_file.endswith("listener.md"):
+    if opt("--json-schema"):
+        result("", structured={"summary": "Ты рассказал про усталость на работе и понял, что дело не в лени.",
+                               "themes": ["работа", "усталость"], "helped": "назвать чувство",
+                               "technique": "назвать чувство"})
+        sys.exit(0)
+    if "[приложение] завершение" in prompt:
+        text = "Стало яснее: это усталость, а не лень. Возьми с собой одно — отдых тоже часть дела."
+    else:
+        text = "Слышу тебя. Похоже скорее на усталость, чем на лень — так?"
+        if "[память]" in prompt:
+            text += " (помню прошлые разговоры)"
+    transcript("assistant", text)
+    say(text)
+    result(text)
+    sys.exit(0)
+
+# ---------------------------------------------------------------- репетитор через настоящий MCP
+import anyio  # noqa: E402
+from mcp import ClientSession  # noqa: E402
+from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
+
+
+async def tutor():
+    cfg = json.load(open(opt("--mcp-config")))["mcpServers"]["nastavnik"]
+    params = StdioServerParameters(command=cfg["command"], args=cfg["args"], env={**os.environ, **cfg["env"]})
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            async def call(name, arguments):
+                tool_use("mcp__nastavnik__" + name, arguments)
+                res = await session.call_tool(name, arguments)
+                return json.loads(res.content[0].text)
+
+            state = await call("get_state", {})
+            plan = state.get("план") or {}
+            concept = plan.get("concept") or next((c["slug"] for c in state["карта"] if c["status"] != "mastered"), "")
+            seen = " (вижу состояние темы)" if "[состояние темы]" in prompt else ""
+            if "Начни сессию" in prompt:
+                await call("set_step", {"step": "hook"})
+                hook = state.get("форматы", {}).get("hook", "")
+                return f"Крючок ({hook}){seen}: почему письмо доходит, даже если часть пути сломана? Попробуй угадать."
+            if "Время заканчивать" in prompt:
+                await call("mark_concept", {"concept": concept})
+                await call("add_items", {"concept": concept, "items": [
+                    {"prompt": "Что делает маршрутизатор?", "answer": "Выбирает, куда отправить пакет дальше."},
+                    {"prompt": "Нарисуй по памяти путь пакета от тебя до сайта", "answer": "ПК → роутер → провайдер → сайт",
+                     "kind": "schema"}]})
+                await call("set_step", {"step": "gift"})
+                await call("set_step", {"step": "loop"})
+                await call("checkpoint", {"covered": "Пакеты и маршруты", "difficulties": "порядок пакетов",
+                                          "open_loop": "Почему TCP тормозит при потерях?",
+                                          "now_can": "объяснить, как пакет находит дорогу"})
+                return ("Подарок: так же устроена почта между планетами в проекте NASA.\n\n"
+                        "На следующий раз: почему TCP тормозит при потерях?")
+            correct = "не знаю" not in prompt.lower()
+            await call("record_attempt", {"concept": concept, "phase": "practice", "correct": correct,
+                                          "grade": 3 if correct else 1, "note": "тест"})
+            await call("set_step", {"step": "practice"})
+            return ("Верно: ты учёл, что путь выбирается заново на каждом узле." if correct
+                    else "Подсказка: подумай, что делает каждый узел по пути.") + seen + " Следующий вопрос?"
+
+
+text = anyio.run(tutor)
+transcript("assistant", text)
+say(text)
+result(text)
