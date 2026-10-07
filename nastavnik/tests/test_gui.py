@@ -517,3 +517,46 @@ def test_one_lesson_counts_as_studied_right_away(gui):
     c.window.open_page("progress")
     pump(0.2)
     assert "пройдено 1 из 5 · закреплено 0" in texts(c.window.progress_page.area)
+
+
+def test_review_ahead_when_nothing_is_due(gui):
+    """«Повторять сейчас нечего», а карточки есть — их видно на странице темы и можно повторить заранее."""
+    c, st, _ = gui
+    tid = topic_with_map(c)
+    c0 = st.concept_by_slug(tid, "c0")
+    st.update_concept(c0["id"], status="learning", introduced_at=time.time() - 3600)
+    ids = []
+    for k, prompt in enumerate(("Что делает маршрутизатор?", "Нарисуй по памяти путь пакета")):
+        iid = st.add_item(tid, c0["id"], prompt, "Выбирает, куда отправить пакет.", kind="schema" if k else "card")
+        st.update_item(iid, due=time.time() + (1 + k) * 86400, reps=1, stability=1.2 + k, difficulty=5,
+                       last_review=time.time() - 3600)
+        ids.append(iid)
+    c.window.open_review()
+    pump(0.2)
+    page = c.window.review_page
+    assert page.current is None and "Повторять сейчас нечего" in page.empty.text()
+    assert page.ahead_btn.isVisible() and "2 карточки" in page.ahead_btn.text()
+    page.ahead_btn.click()
+    pump(0.1)
+    assert page.ahead and page.current["id"] == ids[0]           # сначала та, что ближе к сроку
+    assert "ЗАРАНЕЕ · ПО ПЛАНУ ЗАВТРА" in page.meta.text() and page.subtitle.text() == "Заранее · осталось 2"
+    QTest.keyClick(page.attempt, Qt.Key_Return)
+    page.grade(fsrs.GOOD)
+    pump(0.1)
+    a = st.attempts()[-1]
+    assert a["phase"] == "ahead" and a["item_id"] == ids[0]
+    assert st.item(ids[0])["reps"] == 2
+    page.reveal()
+    page.grade(fsrs.GOOD)
+    pump(0.1)
+    assert page.current is None and "Готово — всё повторили заранее" in page.empty.text()
+    assert not page.ahead_btn.isVisible()
+    # на странице темы — список карточек со сроками и кнопка «Повторить заранее»
+    c.window.open_topic(tid)
+    pump(0.2)
+    area = texts(c.window.learn_page.area)
+    assert "карточки для повторения · 2" in area.lower() and "Что делает маршрутизатор?" in area
+    assert "схема по памяти · повторение" in area
+    find_button(c.window.learn_page.area, "Повторить заранее (2)").click()
+    pump(0.1)
+    assert c.window.current == "review" and page.ahead and page.current is not None

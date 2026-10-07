@@ -588,6 +588,13 @@ class Controller(QObject):
         items.sort(key=lambda i: (fsrs.current_r(i, ts, k) if fsrs.current_r(i, ts, k) is not None else 1.0))
         return items
 
+    def review_ahead_queue(self, topic_id: int | None = None) -> list[dict]:
+        """Карточки, у которых срок ещё не подошёл, — чтобы повторить самому: сначала те, что ближе к сроку."""
+        end = day_start(now()) + DAY - 1
+        items = [i for i in self.storage.items(topic_id=topic_id) if not i["suspended"] and (i["due"] or 0) > end]
+        items.sort(key=lambda i: i["due"] or 0)
+        return items
+
     def begin_review_session(self, topic_id: int | None) -> int:
         ts = now()
         trigger = metrics.trigger_for(self.storage, ts)
@@ -596,9 +603,10 @@ class Controller(QObject):
         self._begin_active("review", sid)
         return sid
 
-    def review_grade(self, item_id: int, grade: int, latency_ms: int, session_id: int | None) -> None:
+    def review_grade(self, item_id: int, grade: int, latency_ms: int, session_id: int | None,
+                     ahead: bool = False) -> None:
         engine.record_review(self.storage, self.settings, item_id, grade, latency_ms=latency_ms,
-                             session_id=session_id)
+                             session_id=session_id, ahead=ahead)
 
     def end_review_session(self) -> None:
         if self.active_kind == "review":

@@ -24,7 +24,7 @@ def memory_factor(storage) -> float:
 def recalibrate(storage) -> tuple[float, int]:
     """Пересчитать личный множитель памяти по всем повторениям с перерывом от суток."""
     rows = storage.query("SELECT retrievability, elapsed_days, correct FROM attempts "
-                         "WHERE phase IN ('review', 'delayed') AND elapsed_days IS NOT NULL")
+                         "WHERE phase IN ('review', 'delayed', 'ahead') AND elapsed_days IS NOT NULL")
     k, n = fsrs.fit_memory_factor([(r["retrievability"], r["elapsed_days"], r["correct"]) for r in rows])
     storage.meta_set(FACTOR_KEY, f"{k:.2f}")
     storage.meta_set(FACTOR_N_KEY, str(n))
@@ -32,12 +32,18 @@ def recalibrate(storage) -> tuple[float, int]:
 
 
 def is_delayed_test(storage, item: dict, ts: float) -> bool:
-    """Первое повторение карточки понятия спустя 1,5+ дня после того, как понятие ввели."""
+    """Первое повторение карточки понятия спустя 1,5+ дня после того, как понятие ввели.
+    Если понятие уже повторяли сами раньше срока, проверка нечистая: вспоминать помогло
+    повторение, а не формат подачи, — такое не считаем отложенным тестом."""
     if not item.get("concept_id"):
         return False
     prior = storage.one("SELECT count(*) AS n FROM attempts WHERE item_id=? AND phase IN ('review', 'delayed')",
                         (item["id"],))
     if prior and prior["n"]:
+        return False
+    early = storage.one("SELECT count(*) AS n FROM attempts WHERE concept_id=? AND phase='ahead' AND ts<?",
+                        (item["concept_id"], ts))
+    if early and early["n"]:
         return False
     concept = storage.concept(item["concept_id"])
     intro = (concept or {}).get("introduced_at") or item.get("created_at")
@@ -45,8 +51,12 @@ def is_delayed_test(storage, item: dict, ts: float) -> bool:
 
 
 def record_review(storage, settings, item_id: int, grade: int, latency_ms: int = 0, confidence: int | None = None,
-                  session_id: int | None = None, ts: float | None = None) -> dict:
-    """Ответ на карточку в Повторении. Возвращает новое состояние карточки и фазу."""
+                  session_id: int | None = None, ts: float | None = None, ahead: bool = False) -> dict:
+    """Ответ на карточку в Повторении. Возвращает новое состояние карточки и фазу.
+
+    ahead — повторяете сами, раньше срока. FSRS учитывает и такое повторение (вспоминать сразу легче,
+    поэтому срок сдвигается меньше). Если с введения понятия прошло 1,5+ дня, это всё равно честный
+    отложенный тест; раньше — фаза «ahead», и проверка форматов по этому понятию пропускается."""
     ts = ts or _now()
     item = storage.item(item_id)
     if not item:
@@ -57,7 +67,7 @@ def record_review(storage, settings, item_id: int, grade: int, latency_ms: int =
     new = fsrs.review(item, grade, ts, k=k, desired=desired)
     storage.update_item(item_id, **{f: new[f] for f in ("state", "stability", "difficulty", "due", "last_review",
                                                          "reps", "lapses")})
-    phase = "delayed" if delayed else "review"
+    phase = "delayed" if delayed else ("ahead" if ahead else "review")
     storage.log_attempt(phase, grade >= fsrs.HARD, grade=grade, session_id=session_id, topic_id=item["topic_id"],
                         concept_id=item["concept_id"], item_id=item_id, latency_ms=latency_ms,
                         confidence=confidence, elapsed_days=new["elapsed_days"],
@@ -71,7 +81,7 @@ def record_review(storage, settings, item_id: int, grade: int, latency_ms: int =
     if item["concept_id"]:
         refresh_concept(storage, item["concept_id"])
     n_cal = int(storage.meta_get(FACTOR_N_KEY, "0") or 0)
-    total = storage.one("SELECT count(*) AS n FROM attempts WHERE phase IN ('review','delayed') "
+    total = storage.one("SELECT count(*) AS n FROM attempts WHERE phase IN ('review','delayed','ahead') "
                         "AND elapsed_days IS NOT NULL")["n"]
     if total >= fsrs.MIN_CALIBRATION and total - n_cal >= 25:
         recalibrate(storage)
@@ -79,9 +89,12 @@ def record_review(storage, settings, item_id: int, grade: int, latency_ms: int =
     return new
 
 
-def concept_accuracy(storage, concept_id: int, session_id: int | None = None) -> float | None:
-    sql = "SELECT correct FROM attempts WHERE concept_id=? AND phase IN ('pretest','practice','recall')"
-    params: list = [concept_id]
+def concept_accuracy(storage, concept_id: int, session_id: int | None = None,
+                     phases: tuple[str, ...] = ("practice", "recall")) -> float | None:
+    """Доля верных ответов по понятию. Крючок (pretest) не считается: это вопрос до объяснения,
+    ошибиться в нём нормально — ради этого он и задаётся."""
+    sql = f"SELECT correct FROM attempts WHERE concept_id=? AND phase IN ({','.join('?' * len(phases))})"
+    params: list = [concept_id, *phases]
     if session_id is not None:
         sql += " AND session_id=?"
         params.append(session_id)
@@ -98,6 +111,8 @@ def add_session_items(storage, topic_id: int, concept_id: int | None, items: lis
     ts = ts or _now()
     acc = concept_accuracy(storage, concept_id, session_id) if concept_id else None
     grade = fsrs.grade_from_accuracy(acc)
+    if acc is None and concept_id and concept_accuracy(storage, concept_id, session_id, ("pretest",)) is not None:
+        grade = fsrs.HARD               # был только крючок, без практики — проверим уже завтра
     ids = []
     for it in items:
         prompt = (it.get("prompt") or "").strip()

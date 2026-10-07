@@ -42,7 +42,7 @@ class Plan:
 
 
 def review_minutes(storage) -> float:
-    rows = storage.query("SELECT latency_ms FROM attempts WHERE phase IN ('review','delayed') AND latency_ms>0 "
+    rows = storage.query("SELECT latency_ms FROM attempts WHERE phase IN ('review','delayed','ahead') AND latency_ms>0 "
                          "ORDER BY ts DESC LIMIT 200")
     if len(rows) < 10:
         return DEFAULT_REVIEW_MIN

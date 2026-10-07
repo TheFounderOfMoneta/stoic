@@ -5,6 +5,9 @@
 «Показать ответ» — это время вспоминания; из него план узнаёт, сколько у вас занимает карточка.
 Первое повторение понятия через несколько дней — отложенный тест: по нему проверяются форматы.
 
+Повторить заранее можно когда угодно: карточки, у которых срок ещё не подошёл, — сначала ближайшие.
+Вспоминать раньше срока легче, поэтому FSRS сдвигает срок меньше, чем после планового повторения.
+
 Карточку-схему («нарисуй по памяти…») можно нарисовать на доске: «Готово» показывает вашу схему
 рядом с эталоном Claude (тоже схемой, если он записан в Mermaid). Рисунок сохраняется.
 """
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBox
 
 from .. import sketch
 from ..learn import engine, fsrs
+from ..util import ahead_text, plural
 from . import widgets as W
 from .board import TOOLS, BoardPanel, SchemaView
 from .pages import Page, button, clear_layout, label
@@ -96,6 +100,19 @@ class ReviewPage(Page):
         self.body.addWidget(self.progress)
         self.empty = label("", "Hint")
         self.body.addWidget(self.empty)
+        self.ahead_btn = button("Повторить заранее", lambda: self.start(self.topic_id, ahead=True), primary=True)
+        self.ahead_btn.setToolTip("Понятия, которые повторили раньше чем через 1,5 дня после урока, не идут в проверку "
+                                  "форматов — по ним приложение не будет судить, что вам подходит")
+        self.ahead_note = label("Срок ещё не подошёл, но вспомнить можно и сейчас. Вспоминать раньше срока легче, "
+                                "поэтому следующее повторение сдвинется меньше, чем после планового.", "Muted")
+        row = QHBoxLayout()
+        row.addWidget(self.ahead_btn)
+        row.addStretch(1)
+        self.body.addLayout(row)
+        self.body.addWidget(self.ahead_note)
+        self.ahead_btn.hide()
+        self.ahead_note.hide()
+        self.ahead = False
         self.shortcuts = []
         for key, fn in (("Space", self._space), ("1", lambda: self._key(1)), ("2", lambda: self._key(2)),
                         ("3", lambda: self._key(3)), ("4", lambda: self._key(4))):
@@ -105,22 +122,36 @@ class ReviewPage(Page):
             self.shortcuts.append(sc)
 
     # ------------------------------------------------------------- очередь
-    def start(self, topic_id: int | None = None) -> None:
+    def start(self, topic_id: int | None = None, ahead: bool = False) -> None:
+        if self.session_id is not None and ahead != self.ahead:
+            self.c.end_review_session()
         self.topic_id = topic_id
-        self.queue = self.c.review_queue(topic_id)
+        self.ahead = ahead
+        self.queue = self.c.review_ahead_queue(topic_id) if ahead else self.c.review_queue(topic_id)
         self.done = 0
         self.session_id = None
         self._next()
 
     def _next(self) -> None:
+        self.ahead_btn.hide()
+        self.ahead_note.hide()
         if not self.queue:
             self.current = None
             self.card.hide()
             self.c.end_review_session()
-            text = "На сегодня всё." if self.done else "Повторять сейчас нечего."
+            if self.ahead:
+                text = "Готово — всё повторили заранее." if self.done else "Карточек пока нет: их делает Claude в конце сессии."
+            else:
+                text = "На сегодня всё." if self.done else "Повторять сейчас нечего."
             nxt = self.c.next_due_text()
             self.empty.setText(text + (" " + nxt if nxt else ""))
             self.empty.show()
+            upcoming = len(self.c.review_ahead_queue(self.topic_id))
+            if upcoming and not (self.ahead and self.done):
+                self.ahead_btn.setText(f"Повторить заранее · {upcoming} "
+                                       f"{plural(upcoming, ('карточка', 'карточки', 'карточек'))}")
+                self.ahead_btn.show()
+                self.ahead_note.show()
             self.progress.setText(f"Повторено: {self.done}" if self.done else "")
             self.subtitle.setText("Карточки, у которых подошёл срок")
             return
@@ -140,6 +171,8 @@ class ReviewPage(Page):
             meta.append("проверка: помните ли через несколько дней")
         if item["kind"] == "schema":
             meta.append("схема по памяти")
+        if self.ahead and item.get("due"):
+            meta.append(f"заранее · по плану {ahead_text(item['due'])}")
         self.meta.setText("  ·  ".join(m for m in meta if m).upper())
         self.question.setText(item["prompt"])
         self.answer.setText(item["answer"] or "—")
@@ -161,7 +194,7 @@ class ReviewPage(Page):
         self.revealed_at = 0.0
         left = len(self.queue)
         self.progress.setText(f"Повторено: {self.done}" if self.done else "")
-        self.subtitle.setText(f"Осталось {left}")
+        self.subtitle.setText(("Заранее · осталось " if self.ahead else "Осталось ") + str(left))
 
     def reveal(self) -> None:
         if not self.current or self.revealed:
@@ -195,7 +228,7 @@ class ReviewPage(Page):
             return
         latency = int(((self.revealed_at or time.time()) - self.shown_at) * 1000)
         item = self.queue.pop(0)
-        self.c.review_grade(item["id"], g, latency, self.session_id)
+        self.c.review_grade(item["id"], g, latency, self.session_id, ahead=self.ahead)
         self.done += 1
         if g == fsrs.AGAIN:                      # «Снова» — вернётся в конце этой же очереди
             fresh = self.c.storage.item(item["id"])

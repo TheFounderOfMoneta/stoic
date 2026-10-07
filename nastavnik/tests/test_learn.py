@@ -125,6 +125,54 @@ def test_bad_practice_brings_review_tomorrow(env):
     assert st.item(ids[0])["due"] - T0 < 1.1 * DAY
 
 
+def test_wrong_hook_answer_does_not_push_cards_to_tomorrow(env):
+    """Крючок — вопрос до объяснения: ошибка в нём нормальна и не значит, что понятие далось плохо."""
+    st, _ = env
+    tid = make_topic(st, 2)
+    c = st.concept_by_slug(tid, "c0")
+    sid = st.start_session("learn", tid, started=T0)
+    st.log_attempt("pretest", False, grade=1, session_id=sid, concept_id=c["id"], ts=T0)
+    for _ in range(2):
+        st.log_attempt("practice", True, session_id=sid, concept_id=c["id"], ts=T0 + 300)
+    ids = engine.add_session_items(st, tid, c["id"], [{"prompt": "q", "answer": "a"}], session_id=sid, ts=T0)
+    assert 2 * DAY <= st.item(ids[0])["due"] - T0 <= 4 * DAY
+    # был только крючок, без практики — проверим уже завтра
+    c1 = st.concept_by_slug(tid, "c1")
+    st.log_attempt("pretest", True, session_id=sid, concept_id=c1["id"], ts=T0)
+    ids = engine.add_session_items(st, tid, c1["id"], [{"prompt": "q", "answer": "a"}], session_id=sid, ts=T0)
+    assert st.item(ids[0])["due"] - T0 < 1.5 * DAY
+
+
+def test_review_ahead_counts_for_memory_but_not_for_format_test(env):
+    """Повторили сами в день урока: FSRS это учитывает, а отложенный тест по понятию уже нечистый."""
+    st, settings = env
+    tid = make_topic(st, 2)
+    arms = {"order": "task_first", "present": "schema", "recall": "own_words", "hook": "riddle",
+            "gift": "secret", "kind": "concept"}
+    sid = st.start_session("learn", tid, started=T0, arms=arms)
+    c0, c1 = st.concept_by_slug(tid, "c0"), st.concept_by_slug(tid, "c1")
+    items = {}
+    for c in (c0, c1):
+        engine.introduce_concept(st, c["id"], sid, ts=T0)
+        st.log_attempt("practice", True, session_id=sid, topic_id=tid, concept_id=c["id"], ts=T0 + 60)
+        items[c["slug"]] = engine.add_session_items(st, tid, c["id"], [{"prompt": "q", "answer": "a"}],
+                                                    session_id=sid, ts=T0 + 120)[0]
+    before = st.item(items["c0"])
+    res = engine.record_review(st, settings, items["c0"], fsrs.GOOD, ts=T0 + 3 * 3600, ahead=True)
+    after = st.item(items["c0"])
+    assert res["phase"] == "ahead"
+    assert after["reps"] == before["reps"] + 1 and after["stability"] > before["stability"]
+    assert after["due"] - (T0 + 3 * 3600) >= 3 * DAY           # вспомнили — срок сдвинулся вперёд, а не назад
+    # плановое повторение через несколько дней — не отложенный тест (понятие уже повторяли), награды нет
+    res = engine.record_review(st, settings, items["c0"], fsrs.GOOD, ts=T0 + 5 * DAY)
+    assert res["phase"] == "review"
+    assert st.arm_stats("order", "concept").get("task_first", {}).get("n", 0) == 0
+    # повторили сами, но уже через 2 дня после урока — это честный отложенный тест
+    res = engine.record_review(st, settings, items["c1"], fsrs.GOOD, ts=T0 + 2 * DAY, ahead=True)
+    assert res["phase"] == "delayed"
+    assert st.arm_stats("order", "concept")["task_first"]["n"] == 1
+
+
 def test_concept_becomes_mastered(env):
     st, settings = env
     tid = make_topic(st, 1)

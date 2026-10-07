@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         return side
 
     # ------------------------------------------------------------- навигация
-    def open_page(self, key: str, topic_id: int | None = None) -> None:
+    def open_page(self, key: str, topic_id: int | None = None, ahead: bool = False) -> None:
         if self.stack.currentWidget() is self.review_page.area and key != "review":
             self.c.end_review_session()
         self.sidebar.show()
@@ -199,7 +199,7 @@ class MainWindow(QMainWindow):
         elif key == "learn":
             page.refresh()
         elif key == "review":
-            page.start(topic_id)
+            page.start(topic_id, ahead)
         elif key == "progress":
             page.refresh()
         elif key == "talk":
@@ -216,8 +216,8 @@ class MainWindow(QMainWindow):
         self.open_page("learn")
         self.learn_page.open_topic(topic_id)
 
-    def open_review(self, topic_id: int | None = None) -> None:
-        self.open_page("review", topic_id)
+    def open_review(self, topic_id: int | None = None, ahead: bool = False) -> None:
+        self.open_page("review", topic_id, ahead)
 
     def open_session(self) -> None:
         self.sidebar.hide()

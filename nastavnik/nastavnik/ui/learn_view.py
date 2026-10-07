@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, 
 
 from ..learn import bandit, engine
 from ..tutor import LEVELS, STEP_LABELS
-from ..util import when_text
+from ..util import ahead_text, when_text
 from . import widgets as W
 from .board import BoardPanel
 from .chat import ChatInput, ChatView
@@ -158,8 +158,12 @@ class LearnPage(Page):
         self.start_btn.setEnabled(bool(concepts))
         row.addWidget(self.start_btn)
         due = engine.topic_progress(st, topic_id)["due"]
+        cards = [i for i in st.items(topic_id=topic_id) if not i["suspended"]]
         if due:
             row.addWidget(button(f"Повторить ({due})", lambda: self.c.window.open_review(topic_id)))
+        elif cards:
+            row.addWidget(button(f"Повторить заранее ({len(cards)})",
+                                 lambda: self.c.window.open_review(topic_id, ahead=True)))
         row.addStretch(1)
         card.add_layout(row)
         self.body.addWidget(card)
@@ -180,6 +184,15 @@ class LearnPage(Page):
             g.add_widget(self.status_label)
             g.add_widget(button("Составить карту с Claude", lambda: self.c.build_map(topic_id), primary=True))
         self.body.addWidget(g)
+        if cards:
+            g = W.Group(f"Карточки для повторения · {len(cards)}",
+                        "Их делает Claude в конце сессии. Возвращаются, когда вы вот-вот их забудете; "
+                        "повторить можно и раньше.")
+            for it in sorted(cards, key=lambda i: i["due"] or 0)[:40]:
+                when = ahead_text(it["due"]) if it["due"] else ""
+                kind = {"schema": "схема по памяти", "task": "задача"}.get(it["kind"], "")
+                g.add_row(it["prompt"], " · ".join(x for x in (kind, f"повторение {when}" if when else "") if x))
+            self.body.addWidget(g)
         cps = st.checkpoints(topic_id, 5)
         if cps:
             g = W.Group("Где останавливались")
