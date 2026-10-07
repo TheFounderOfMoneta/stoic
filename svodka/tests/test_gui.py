@@ -70,7 +70,7 @@ def gui(tmp_path, monkeypatch):
     settings = Settings(tmp_path / "settings.json")
     for key, value in (("claude.command", str(FAKE_CLAUDE)), ("translate.prefetch_top", 0),
                        ("ui.welcome_done", True), ("ui.tips_seen", ["feed", "search", "saved", "settings"]),
-                       ("ui.theme", "dark"), ("learning.randomize_top_prob", 0.0)):
+                       ("ui.theme", "dark"), ("learning.randomize_top_prob", 0.0), ("collect.mode", "agent")):
         settings.set(key, value)
     storage = Storage(tmp_path / "db.sqlite3")
     ids = add_articles(storage)

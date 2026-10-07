@@ -27,6 +27,7 @@ def env(tmp_path, monkeypatch):
     settings = Settings(tmp_path / "settings.json")
     settings.set("claude.command", str(FAKE_CLAUDE))
     settings.set("translate.prefetch_top", 0)
+    settings.set("collect.mode", "agent")          # здесь — сбор, где ищет Claude (экономный — test_pipeline)
     storage = Storage(tmp_path / "db.sqlite3")
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "ok")
     return settings, storage, tmp_path / "db.sqlite3"
@@ -331,3 +332,11 @@ def test_search_finds_abbreviations_and_heals_old_index(env):
     for q in ("ИИ", "сша", "нейросети", "компании"):
         found = search.search(storage, q)
         assert found and found[0]["article"]["id"] == aid, q
+
+
+def test_repeated_banner_images_are_dropped():
+    body = {"type": "p", "text": "A real paragraph of the article that is long enough to count as text here."}
+    banner = {"type": "img", "text": "Introducing TQI 2.0", "src": "https://x.example/banner.png"}
+    photo = {"type": "img", "text": "photo", "src": "https://x.example/photo.jpg"}
+    out = extract.clean_blocks([body, banner, photo, body, banner, body])
+    assert [b.get("src") for b in out if b["type"] == "img"] == ["https://x.example/photo.jpg"]

@@ -54,9 +54,11 @@ DEFAULTS: dict = {
         "quota_core": 0.7,                # ваши интересы
         "quota_explore": 0.2,             # разведка соседних тем
         "quota_world": 0.1,               # главное в мире вне профиля
-        "max_turns": 80,
+        "max_turns": 40,
         "timeout_min": 25,
         "max_age_hours": 72,              # старше — не берём: лента о свежем, а не о прошлой неделе
+        "mode": "rss",                    # rss — экономный (заголовки собирает приложение), agent — ищет Claude
+        "feeds": [],                      # свои ленты [{"url", "area"}]; пусто — стандартный набор
     },
     # --- Claude -------------------------------------------------------------
     "claude": {
@@ -66,8 +68,7 @@ DEFAULTS: dict = {
     },
     # --- Перевод -------------------------------------------------------------
     "translate": {
-        "prefetch_top": 5,                # сразу после сбора переводить целиком лучшие N
-        "chunk_words": 1500,
+        "prefetch_top": 3,                # сразу после сбора переводить целиком лучшие N (остальное — при открытии)
         "model": "sonnet",
     },
     # --- Обучение -------------------------------------------------------------
@@ -103,13 +104,14 @@ RANGES = {
     "collect.articles_per_run": (3, 60), "collect.quota_core": (0.0, 1.0),
     "collect.quota_explore": (0.0, 1.0), "collect.quota_world": (0.0, 1.0),
     "collect.max_turns": (10, 300), "collect.timeout_min": (3, 120), "collect.max_age_hours": (12, 336),
-    "translate.prefetch_top": (0, 30), "translate.chunk_words": (300, 5000),
+    "translate.prefetch_top": (0, 30),
     "learning.survey_every": (1, 50), "learning.survey_max_per_day": (0, 20),
     "learning.randomize_top_prob": (0.0, 0.5), "learning.explore_slots": (0, 5),
     "learning.explore_slots_first_week": (0, 5),
     "storage.keep_days": (3, 3650), "storage.image_cache_mb": (50, 20000), "storage.backups": (0, 30),
 }
 CHOICES = {
+    "collect.mode": ("rss", "agent"),
     "ui.theme": ("auto", "dark", "light"),
     "ui.text_size": ("s", "m", "l"),
 }

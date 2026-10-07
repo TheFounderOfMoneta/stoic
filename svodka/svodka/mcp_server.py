@@ -1,6 +1,6 @@
 """MCP-сервер «svodka» — единственный вход Claude в данные приложения.
 
-Claude-сборщик видит только эти инструменты (плюс WebSearch/WebFetch). Он не может выполнять
+Claude-сборщик видит только эти инструменты (плюс WebSearch). Он не может выполнять
 команды и трогать файлы. Сервер проверяет всё, что Claude сохраняет: ссылка должна была
 встретиться в этом запуске (никаких выдуманных ссылок), поля — по схеме, без повторов.
 """
@@ -101,7 +101,7 @@ class Service:
                 out["внимание"] = f"старше {self.max_age_hours} ч — в ленту не подойдёт, ищи свежее"
         if status == "ok":
             ex = extract.Extracted(url=cached["url"], blocks=cached["blocks"])
-            out["начало"] = ex.lead(800)
+            out["начало"] = ex.lead(300)          # хватает для «Коротко» — меньше токенов
         else:
             out["пояснение"] = {"paywall": "платный доступ — текст недоступен; можно сохранить по сниппету",
                                 "captcha": "сайт закрыт проверкой на робота",
@@ -159,6 +159,8 @@ class Service:
         # Дата — и со страницы (метаданные сайта), и от Claude; если любая из них старая — не берём.
         claimed = parse_date(it.published)
         page = (self.storage.get_extracted(it.url) or {}).get("published")
+        if page and time.localtime(page)[3:6] == (0, 0, 0):
+            page += 86399                   # на странице только день, без времени — считаем концом дня
         dates = [d for d in (claimed, page) if d]
         if not dates and self.kind == "collect":
             return ("не удалось определить дату публикации — укажи `published` (ISO 8601) со страницы "

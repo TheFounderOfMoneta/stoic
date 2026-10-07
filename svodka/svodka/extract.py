@@ -227,6 +227,13 @@ def clean_blocks(blocks: list[dict]) -> list[dict]:
     (автор, рубрика); в конце — призывы подписаться и подвал после строки с копирайтом.
     Возвращает те же словари (не копии) — по ним перечищаются уже сохранённые статьи."""
     out = [b for b in blocks if not is_boilerplate(b)]
+    # картинка, повторяющаяся на странице, — рекламный баннер сайта: убираем все копии
+    seen_src: set[str] = set()
+    dup: set[str] = set()
+    for b in out:
+        if b["type"] == "img" and b.get("src"):
+            (dup if b["src"] in seen_src else seen_src).add(b["src"])
+    out = [b for b in out if not (b["type"] == "img" and b.get("src") in dup)]
     # Строки на китайском/японском в некитайской статье — лицензии и подвал сайта (как у CGTN).
     allt = " ".join(b["text"] for b in out)
     if allt and len(_CJK.findall(allt)) / len(allt) < 0.2:

@@ -67,9 +67,9 @@ def build_brief(storage, settings=None, now: float | None = None, kind: str = "c
 
     rules = [{"скрыть": {"mute_source": "источник", "mute_topic": "тему", "mute_entity": "героя"}.get(r["kind"],
               r["kind"]), "что": r["target"]} for r in storage.active_rules()]
-    recent_titles = [r["t"] for r in storage.query(
+    recent_titles = [r["t"][:90] for r in storage.query(
         "SELECT COALESCE(NULLIF(title_orig, ''), title_ru) AS t FROM articles WHERE collected_at >= ? "
-        "ORDER BY collected_at DESC LIMIT 120", (now - 3 * 86400,))]
+        "ORDER BY collected_at DESC LIMIT 50", (now - 3 * 86400,))]
     followed = [{"сюжет": r["title_ru"] or r["title_orig"], "ключ": r["story_key"]} for r in storage.query(
         "SELECT title_ru, title_orig, story_key FROM articles WHERE followed=1 AND collected_at >= ? "
         "ORDER BY collected_at DESC LIMIT 10", (now - 14 * 86400,))]

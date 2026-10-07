@@ -86,6 +86,7 @@ class Builder:
         self.text_chars = 0
         self.cyr_chars = 0
         self.used_marks: set[int] = set()
+        self.used_srcs: set[str] = set()          # одна и та же картинка (реклама сайта) — один раз
 
     def feed(self, text: str) -> None:
         self.buf += text
@@ -125,8 +126,11 @@ class Builder:
         if m:
             idx = int(m.group(2))
             orig = self.originals.get(idx)
-            if orig is not None and idx not in self.used_marks:
+            src = (orig or {}).get("src")
+            if orig is not None and idx not in self.used_marks and not (src and src in self.used_srcs):
                 self.used_marks.add(idx)
+                if src:
+                    self.used_srcs.add(src)
                 self._out(orig["type"], orig.get("text_orig") or "", orig.get("src"))
             return
         if line.startswith("### "):

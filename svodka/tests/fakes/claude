@@ -92,6 +92,32 @@ if system_file.endswith("translate.md"):
     result("")
     sys.exit(0)
 
+if system_file.endswith("select.md"):
+    # отбор по заголовкам: берём всё по порядку
+    data = json.loads(sys.stdin.read() or "{}")
+    topics = [t["название"] for t in data["читатель"]["темы"]]
+    picked = [{"id": x["id"], "topic": x.get("тема-подсказка") if x.get("тема-подсказка") in topics else topics[0],
+               "bucket": "core"} for x in data["заголовки"]][: data["сколько выбрать"]]
+    result("", structured={"read": picked})
+    sys.exit(0)
+
+if system_file.endswith("digest.md"):
+    data = json.loads(sys.stdin.read() or "{}")
+    arts = [{"id": a["id"], "keep": True, "title_ru": "Статья: " + a["заголовок"],
+             "summary_ru": ["Первый факт статьи.", "Второй факт статьи."], "why_ru": "Потому что тест.",
+             "topic": a["тема-кандидат"], "subtopic": "тестовая подтема", "entities": ["OpenAI"],
+             "kind": "analysis", "bucket": "core", "importance": 0.6, "fit": 0.7, "story_key": f"story-{a['id']}"}
+            for a in data["статьи"]]
+    os.environ.get("FAKE_DIGEST_LOG") and open(os.environ["FAKE_DIGEST_LOG"], "w").write(json.dumps(data))
+    result("", structured={"articles": arts, "note": "тест"}, cost=0.02)
+    sys.exit(0)
+
+if system_file.endswith("queries.md"):
+    data = json.loads(sys.stdin.read() or "{}")
+    result("", structured={"topics": [{"name": t["название"], "en": [t["название"] + " news"], "ru": []}
+                                      for t in data["темы"]]})
+    sys.exit(0)
+
 if opt("--json-schema"):
     result("", structured=json.loads(os.environ.get("FAKE_STRUCTURED", "{}")))
     sys.exit(0)

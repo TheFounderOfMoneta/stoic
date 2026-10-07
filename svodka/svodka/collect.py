@@ -99,8 +99,9 @@ def build_args(settings, mcp_path: Path, prompt_file: Path) -> list[str]:
         "--model", settings.get("claude.model", "sonnet"),
         "--fallback-model", settings.get("claude.fallback_model", "haiku"),
         "--mcp-config", str(mcp_path), "--strict-mcp-config",
-        "--tools", "WebSearch,WebFetch",
-        "--allowedTools", "WebSearch,WebFetch,mcp__svodka__*",
+        # WebFetch не нужен: страницы читает само приложение (read_article) — без лишних токенов
+        "--tools", "WebSearch",
+        "--allowedTools", "WebSearch,mcp__svodka__*",
         "--permission-mode", "dontAsk",
         "--max-turns", str(int(settings.get("collect.max_turns", 80))),
         "--no-session-persistence",
@@ -127,6 +128,23 @@ def run(settings, storage, kind: str = "collect", query: str = "", force: bool =
 
 def _run_locked(settings, storage, kind, query, progress, cancel, db_path) -> dict:
     run_id = storage.start_run(kind, query)
+    if kind == "collect" and settings.get("collect.mode", "rss") != "agent":
+        # Экономный сбор: заголовки — приложение, Claude только выбирает и пишет «Коротко».
+        from . import pipeline
+        try:
+            out = pipeline.run(settings, storage, run_id, progress, cancel)
+            if out is not None:
+                return _finish(settings, storage, kind, query, run_id, None, out.get("cost", 0.0), progress)
+        except claude_cli.ClaudeError as exc:
+            return _finish(settings, storage, kind, query, run_id, exc, 0.0, progress)
+        except Exception:  # noqa: BLE001 — сбой нового пути не должен оставить без ленты
+            log.exception("экономный сбор")
+        progress("Источники заголовков недоступны — ищу с помощью Claude…")
+    return _run_agent(settings, storage, kind, query, run_id, progress, cancel, db_path)
+
+
+def _run_agent(settings, storage, kind, query, run_id, progress, cancel, db_path) -> dict:
+    """Сбор/поиск, где Claude сам ищет в интернете (поиск по запросу и запасной путь сбора)."""
     prompt_file = PROMPTS_DIR / ("search.md" if kind == "search" else "collect.md")
     if kind == "search":
         system_file = RUNTIME_DIR / f"search-{run_id}.md"
@@ -155,6 +173,10 @@ def _run_locked(settings, storage, kind, query, progress, cancel, db_path) -> di
                     tmp.unlink()
             except OSError:
                 pass
+    return _finish(settings, storage, kind, query, run_id, error, cost, progress)
+
+
+def _finish(settings, storage, kind, query, run_id, error, cost, progress) -> dict:
     saved = int(storage.one("SELECT count(*) AS n FROM articles WHERE run_id=?", (run_id,))["n"])
     if error is None:
         status = "ok" if saved else "empty"

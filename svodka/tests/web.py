@@ -58,9 +58,32 @@ PAGES = {
 }
 
 
+def rss(items: list[tuple[str, str, float]], title: str = "Test feed") -> str:
+    """Лента RSS: (заголовок, ссылка, сколько часов назад)."""
+    import email.utils
+    out = "".join(f"<item><title>{t}</title><link>{link}</link><description>Описание: {t}</description>"
+                  f"<pubDate>{email.utils.formatdate(time.time() - h * 3600)}</pubDate></item>"
+                  for t, link, h in items)
+    return f'<?xml version="1.0"?><rss version="2.0"><channel><title>{title}</title>{out}</channel></rss>'
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
-        page = PAGES.get(self.path)
+        base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        if self.path.startswith("/bing"):           # «Bing News»: ссылки-переходники с адресом в url=
+            from urllib.parse import quote
+            items = [("How governments rebuild the machinery of AI decisions",
+                      "http://www.bing.com/news/apiclick.aspx?ref=FexRss&url=" + quote(base + "/en.html"), 3),
+                     ("Old story from last week", "http://www.bing.com/news/apiclick.aspx?url="
+                      + quote(base + "/old.html"), 24 * 8)]
+            page = rss(items, "Bing")
+        elif self.path == "/feed.xml":
+            page = rss([("Нейросеть разбирает обращения граждан", base + "/ru.html", 2),
+                        ("Big story behind a paywall", base + "/paywall.html", 5),
+                        ("Robots check", base + "/captcha.html", 6),
+                        ("How governments rebuild the machinery of AI decisions — analysis", base + "/en.html", 4)])
+        else:
+            page = PAGES.get(self.path)
         if page is None:
             self.send_response(404)
             self.end_headers()
