@@ -99,6 +99,17 @@ def test_muted_source_never_shown(tmp_path):
     assert all(it.article["domain"] != "site1.com" for it in feed.all_items())
 
 
+def test_week_old_article_never_in_main(tmp_path):
+    """Собрано сегодня, но опубликовано неделю назад — это не свежее: ни в «Главном», ни в «Ещё свежем»."""
+    st = _store(tmp_path)
+    for i in range(8):
+        st.add_article(_article(i, published_at=time.time() - 3 * 3600))
+    old = st.add_article(_article(99, published_at=time.time() - 8 * 86400, fit=1.0, importance=1.0))
+    feed = Ranker(st).build()
+    assert old not in {it.id for it in feed.main + feed.more}
+    assert old in {it.id for _d, items in feed.days for it in items}              # в архиве дня — пожалуйста
+
+
 def test_feed_is_stable_within_a_day(tmp_path):
     st = _store(tmp_path)
     for i in range(15):

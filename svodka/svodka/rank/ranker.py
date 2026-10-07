@@ -25,6 +25,7 @@ from .model import InterestModel, Personal, day_rng
 
 MAIN_SIZE = 5
 RECENT_HOURS = 48
+FRESH_HOURS = 72          # «Главное» и «Ещё свежее» — только опубликованное за последние 3 дня
 FEED_DAYS = 7
 
 
@@ -218,7 +219,9 @@ class Ranker:
         rows = [a for a in rows if not rule_blocks(a, self.rules)]
         items = self.score_many(rows)
         recent_cut = self.now - RECENT_HOURS * 3600
-        fresh_new = [it for it in items if it.article["status"] == "new" and it.article["collected_at"] >= recent_cut]
+        max_age = float(self._setting("collect.max_age_hours", FRESH_HOURS)) * 3600
+        fresh_new = [it for it in items if it.article["status"] == "new" and it.article["collected_at"] >= recent_cut
+                     and self.now - float(it.article.get("published_at") or it.article["collected_at"]) <= max_age]
         main, rest = diversify(fresh_new, MAIN_SIZE, story_cap=1, entity_cap=2)
         main = self._ensure_exploration(main, rest)
         main_ids = {it.id for it in main}

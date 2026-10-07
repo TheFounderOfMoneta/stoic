@@ -186,8 +186,13 @@ class Controller(QObject):
             self.window.show()
         self.refresh_feed()
         self.update_status()
-        from . import search as libsearch
-        self.spawn(lambda: libsearch.ensure_index(self.storage))       # самопочинка поискового индекса
+        from . import extract, search as libsearch
+
+        def heal():
+            # самопочинка: статьи, сохранённые по старым правилам очистки, и поисковый индекс
+            extract.reclean(self.storage)
+            libsearch.ensure_index(self.storage)
+        self.spawn(heal)
         if self.services:
             self.check_claude(quiet=True)
             self.spawn(self._ensure_timer)

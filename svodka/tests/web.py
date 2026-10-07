@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.server
 import threading
+import time
 
 EN_PARAS = [
     "Governments are quietly rebuilding the machinery that decides how artificial intelligence is deployed. "
@@ -30,6 +31,10 @@ RU_PARAS = [
 ]
 
 
+# Статьи «опубликованы» три часа назад: сервер принимает только свежее (тесты не стареют со временем).
+FRESH = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3 * 3600))
+
+
 def article_html(title: str, paras: list[str], lang: str = "en") -> str:
     body = "".join(f"<p>{p}</p>" for p in paras[:3])
     body += "<h2>How it works</h2>" if lang == "en" else "<h2>Как это работает</h2>"
@@ -39,7 +44,7 @@ def article_html(title: str, paras: list[str], lang: str = "en") -> str:
     body += '<figure><img src="/img/chart.png" alt="chart"><figcaption>Chart</figcaption></figure>'
     body += "".join(f"<p>{p}</p>" for p in paras[3:])
     return (f'<html lang="{lang}"><head><title>{title}</title>'
-            f'<meta property="article:published_time" content="2026-10-06T08:00:00Z"></head>'
+            f'<meta property="article:published_time" content="{FRESH}"></head>'
             f"<body><nav>Home · About · Subscribe</nav><article><h1>{title}</h1>{body}</article>"
             f"<footer>© Test site</footer></body></html>")
 

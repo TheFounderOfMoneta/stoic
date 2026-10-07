@@ -74,9 +74,14 @@ def build_brief(storage, settings=None, now: float | None = None, kind: str = "c
         "SELECT title_ru, title_orig, story_key FROM articles WHERE followed=1 AND collected_at >= ? "
         "ORDER BY collected_at DESC LIMIT 10", (now - 14 * 86400,))]
 
+    max_age_h = int(get("collect.max_age_hours", 72))
+    cutoff = time.strftime("%Y-%m-%d %H:%M", time.localtime(now - max_age_h * 3600))
+    freshness = (f"только опубликованное после {cutoff} (последние {max_age_h} ч), лучше — за последние 24–36 ч; "
+                 "старое и без даты сервер отклонит" if kind == "collect" else "по запросу — до года, свежее лучше")
     brief = {
         "задача": "сбор" if kind == "collect" else "поиск по запросу",
         "сейчас": time.strftime("%Y-%m-%d %H:%M", time.localtime(now)),
+        "свежесть": freshness,
         "темы": [{"название": t["name"], "описание": t["description"], "вес": t["weight"],
                   "обязательные слова": t["include_words"], "исключить": t["exclude_words"]}
                  for t in storage.topics()],

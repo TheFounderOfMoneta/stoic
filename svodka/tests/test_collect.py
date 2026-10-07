@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -100,10 +101,30 @@ def test_mcp_rejects_invented_and_old(env):
     assert out["сохранено"] == 0
     reasons = " ".join(r["причина"] for r in out["отклонено"])
     assert "старше" in reasons and "не открывается" in reasons
+    week_ago = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 8 * 86400))
+    out = json.loads(svc.save_articles([{**item, "published": week_ago}]))
+    assert out["сохранено"] == 0 and "старше" in out["отклонено"][0]["причина"]     # неделя — уже не новости
     out = json.loads(svc.save_articles([{**item, "published": ""}]))
+    assert out["сохранено"] == 0 and "дату публикации" in out["отклонено"][0]["причина"]
+    fresh = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 5 * 3600))
+    out = json.loads(svc.save_articles([{**item, "published": fresh}]))
     assert out["сохранено"] == 1
-    out = json.loads(svc.save_articles([{**item, "published": ""}]))
+    out = json.loads(svc.save_articles([{**item, "published": fresh}]))
     assert out["отклонено"][0]["причина"] == "уже есть в ленте"
+
+
+def test_page_date_beats_claimed_date(env):
+    """Claude сказал «сегодня», а сайт в метаданных — «8 дней назад»: не берём."""
+    settings, storage, _db = env
+    run_id = storage.start_run("collect")
+    svc = Service(storage, settings, run_id)
+    url = "https://real.example/old"
+    svc.filter_new([url])
+    storage.cache_extracted(extract.Extracted(url=url, status="ok", published=time.time() - 8 * 86400,
+                                              blocks=[{"type": "p", "text": "x"}], words=300))
+    out = json.loads(svc.save_articles([{"url": url, "title_ru": "Т", "topic": "ИИ: развитие", "summary_ru": ["ф"],
+                                         "published": time.strftime("%Y-%m-%dT%H:%M:%S")}]))
+    assert out["сохранено"] == 0 and "старше" in out["отклонено"][0]["причина"]
 
 
 def test_unknown_topic_becomes_exploration(env):
@@ -112,7 +133,7 @@ def test_unknown_topic_becomes_exploration(env):
     svc = Service(storage, settings, run_id)
     svc.filter_new(["https://x.example/a"])
     svc.save_articles([{"url": "https://x.example/a", "title_ru": "Т", "topic": "Квантовые сенсоры",
-                        "summary_ru": ["ф"], "bucket": "core"}])
+                        "summary_ru": ["ф"], "bucket": "core", "published": time.strftime("%Y-%m-%dT%H:%M:%S")}])
     assert storage.article_by_url("https://x.example/a")["bucket"] == "explore"
 
 
@@ -210,6 +231,59 @@ def test_clean_blocks_drops_site_boilerplate():
     h2 = {"type": "h2", "text": "Why"}
     assert extract.clean_blocks([lead, h2, {"type": "p", "text": body}])[:2] == [lead, h2]
 
+
+
+BODY_EN = ("When a city's population reaches over 20 million, can traditional administrative service models keep up "
+           "with the demands of its residents? Beijing answered with a single hotline.")
+
+
+def test_clean_blocks_cgtn_opinion_page():
+    """Случай со скриншота: меню, «Следите за CGTN», баннер cookie, «Согласен», «рубрика + дата», автор,
+    «Поделиться Скопировано», подпись к фото — до текста; призыв писать в редакцию, лицензия и
+    «горячая линия» — после."""
+    junk_head = ["Home China World World Politics Business Sci-Tech Health Culture Nature Travel Sports Live "
+                 "Opinions Documentaries Global Stringer Creative Lab Art & Design Radio Video Newsletters RSS",
+                 "Follow CGTN on:",
+                 "By continuing to browse our site you agree to our use of cookies, revised Privacy Policy and "
+                 "Terms of Use. You can change your cookie settings through your browser.",
+                 "I agree", "Opinion 16:15, 07-Oct-2026", "Huang Jiyuan", "Share Copied",
+                 "Customers shop for products at a POP MART store in London, May 21, 2025. /Xinhua"]
+    note = ("Editor's note: CGTN's First Voice provides instant commentary on breaking stories. The column "
+            "clarifies emerging issues and better defines the news agenda.")
+    junk_tail = ["(If you want to contribute and have specific expertise, please contact us at opinions@cgtn.com. "
+                 "Follow @thouse_opinions on Twitter to discover the latest commentaries in the CGTN Opinion Section.)",
+                 "互联网新闻信息许可证10120180008", "Disinformation report hotline: 010-85061466", "DOWNLOAD OUR APP"]
+    blocks = [{"type": "p", "text": t} for t in junk_head + [note] + [BODY_EN] * 6 + junk_tail]
+    assert [b["text"] for b in extract.clean_blocks(blocks)] == [note] + [BODY_EN] * 6
+    # то же меню по-русски (так его показывала Читалка после перевода)
+    ru_nav = {"type": "p", "text": "Главная Китай Мир Мир Политика Бизнес Наука и технологии Здоровье Культура "
+                                   "Природа Путешествия Спорт Прямой эфир Мнения"}
+    assert ru_nav not in extract.clean_blocks([ru_nav] + [{"type": "p", "text": BODY_EN}] * 3)
+
+
+def test_reclean_fixes_already_saved_articles(env):
+    """Статьи, сохранённые по старым правилам, перечищаются при запуске; перевод текста не теряется."""
+    _settings, storage, _db = env
+    aid = storage.add_article({"url": "https://news.example/a", "title_ru": "Т", "lang": "en"})
+    storage.set_blocks(aid, [{"type": "p", "text": "Share Copied"},
+                             {"type": "p", "text": "By continuing to browse our site you agree to our use of cookies."},
+                             {"type": "p", "text": BODY_EN, "text_ru": "Перевод абзаца."},
+                             {"type": "p", "text": BODY_EN}])
+    storage.meta_set("clean_version", "1")
+    assert extract.reclean(storage) == 1
+    left = storage.blocks(aid)
+    assert [b["text_orig"] for b in left] == [BODY_EN, BODY_EN] and left[0]["text_ru"] == "Перевод абзаца."
+    assert extract.reclean(storage) == 0                                   # один раз
+
+
+def test_free_article_with_subscribe_banner_is_not_paywall():
+    """«Оформите подписку» в шапке сайта — не пейвол, если страница сама говорит, что статья бесплатная."""
+    paras = "".join(f"<p>{BODY_EN} Paragraph {i}.</p>" for i in range(9))
+    html = ('<html><head><script type="application/ld+json">{"isAccessibleForFree": true}</script></head>'
+            f"<body><div>Оформите подписку</div><article><h1>Title</h1>{paras}</article></body></html>")
+    assert extract.extract_html(html, "https://free.example/a").status == "ok"
+    paywalled = html.replace('"isAccessibleForFree": true', '"isAccessibleForFree": "False"')
+    assert extract.extract_html(paywalled, "https://paid.example/a").status == "paywall"
 
 # ---------------------------------------------------------------- Google Takeout
 def test_takeout_import(env, tmp_path, monkeypatch):

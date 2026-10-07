@@ -111,7 +111,9 @@ async def collect():
                     "entities": ["OpenAI", "Госдума"][k % 2:k % 2 + 1], "kind": "analysis",
                     "bucket": "core", "importance": 0.6, "fit": 0.7,
                     "summary_ru": ["Первый факт статьи.", "Второй факт статьи."], "why_ru": "Потому что тест.",
-                    "story_key": f"story-{k}"})
+                    "story_key": f"story-{k}",
+                    # дату Claude берёт со страницы или из выдачи поиска
+                    "published": info.get("опубликовано") or time.strftime("%Y-%m-%dT%H:%M:%S")})
             items.append({"url": "https://invented.invalid/fake", "title_ru": "Выдуманная", "topic": "ИИ: развитие",
                           "summary_ru": ["выдумка"]})
             saved = await call("save_articles", {"items": items})

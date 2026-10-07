@@ -95,6 +95,10 @@ class Service:
                "язык": cached["lang"], "слов": cached["words"]}
         if cached["published"]:
             out["опубликовано"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(cached["published"]))
+            age_h = (time.time() - cached["published"]) / 3600
+            out["возраст, часов"] = max(0, round(age_h))
+            if self.kind == "collect" and age_h > self.max_age_hours:
+                out["внимание"] = f"старше {self.max_age_hours} ч — в ленту не подойдёт, ищи свежее"
         if status == "ok":
             ex = extract.Extracted(url=cached["url"], blocks=cached["blocks"])
             out["начало"] = ex.lead(800)
@@ -107,7 +111,7 @@ class Service:
     def save_articles(self, items: list[dict]) -> str:
         limit = int(self.settings.get("collect.articles_per_run", 15) * 1.6) if self.kind == "collect" else 12
         topics = {t["name"] for t in self.storage.topics()}
-        max_age_days = 10 if self.kind == "collect" else 365
+        max_age_h = self.max_age_hours if self.kind == "collect" else 365 * 24
         saved, rejected = [], []
         for raw in items:
             try:
@@ -115,7 +119,7 @@ class Service:
             except Exception as exc:  # noqa: BLE001
                 rejected.append({"url": str((raw or {}).get("url", "")), "причина": f"неверный формат: {exc}"[:200]})
                 continue
-            reason = self._check(it, max_age_days)
+            reason = self._check(it, max_age_h)
             if reason:
                 rejected.append({"url": it.url, "причина": reason})
                 continue
@@ -130,7 +134,11 @@ class Service:
             saved.append(it.url)
         return json.dumps({"сохранено": len(saved), "отклонено": rejected}, ensure_ascii=False)
 
-    def _check(self, it: ArticleIn, max_age_days: int) -> str:
+    @property
+    def max_age_hours(self) -> int:
+        return int(self.settings.get("collect.max_age_hours", 72))
+
+    def _check(self, it: ArticleIn, max_age_h: int) -> str:
         if not it.url.startswith("http"):
             return "нужна полная ссылка"
         if not self.storage.was_seen_in_run(self.run_id, it.url):
@@ -148,9 +156,15 @@ class Service:
         summary = [s.strip() for s in it.summary_ru if isinstance(s, str) and s.strip()]
         if not summary:
             return "нет «Коротко»"
-        published = parse_date(it.published)
-        if published and time.time() - published > max_age_days * 86400:
-            return "статья старше допустимого"
+        # Дата — и со страницы (метаданные сайта), и от Claude; если любая из них старая — не берём.
+        claimed = parse_date(it.published)
+        page = (self.storage.get_extracted(it.url) or {}).get("published")
+        dates = [d for d in (claimed, page) if d]
+        if not dates and self.kind == "collect":
+            return ("не удалось определить дату публикации — укажи `published` (ISO 8601) со страницы "
+                    "или из выдачи поиска")
+        if dates and time.time() - min(dates) > max_age_h * 3600:
+            return f"статья старше допустимого ({max_age_h} ч) — нужны свежие"
         return ""
 
     def _store(self, it: ArticleIn, topics: set[str]) -> int | None:

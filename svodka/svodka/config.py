@@ -56,6 +56,7 @@ DEFAULTS: dict = {
         "quota_world": 0.1,               # главное в мире вне профиля
         "max_turns": 80,
         "timeout_min": 25,
+        "max_age_hours": 72,              # старше — не берём: лента о свежем, а не о прошлой неделе
     },
     # --- Claude -------------------------------------------------------------
     "claude": {
@@ -101,7 +102,7 @@ RANGES = {
     "schedule.catchup_hours": (1, 72),
     "collect.articles_per_run": (3, 60), "collect.quota_core": (0.0, 1.0),
     "collect.quota_explore": (0.0, 1.0), "collect.quota_world": (0.0, 1.0),
-    "collect.max_turns": (10, 300), "collect.timeout_min": (3, 120),
+    "collect.max_turns": (10, 300), "collect.timeout_min": (3, 120), "collect.max_age_hours": (12, 336),
     "translate.prefetch_top": (0, 30), "translate.chunk_words": (300, 5000),
     "learning.survey_every": (1, 50), "learning.survey_max_per_day": (0, 20),
     "learning.randomize_top_prob": (0.0, 0.5), "learning.explore_slots": (0, 5),
