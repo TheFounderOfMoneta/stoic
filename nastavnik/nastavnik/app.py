@@ -309,10 +309,11 @@ class Controller(QObject):
         ts = now()
         topics = self.storage.topics()
         topic = self.current_topic()
-        mastered = concepts = 0
+        mastered = studied = concepts = 0
         for t in topics:
             p = engine.topic_progress(self.storage, t["id"], ts)
             mastered += p["mastered"]
+            studied += p["studied"]
             concepts += p["total"]
         due_all = len(self.storage.due_items(day_start(ts) + DAY - 1))
         return {
@@ -320,7 +321,8 @@ class Controller(QObject):
             "streak": metrics.streak(self.storage, ts, int(self.settings.get("learn.streak_freezes_per_week", 1))),
             "week_min": metrics.week_minutes(self.storage, ts),
             "week_goal": int(self.settings.get("learn.week_goal_minutes", 180)),
-            "retention": engine.retention_all(self.storage, ts), "mastered": mastered, "concepts": concepts,
+            "retention": engine.retention_all(self.storage, ts), "mastered": mastered, "studied": studied,
+            "concepts": concepts,
             "due_all": due_all, "next_due": planner.next_due_text(self.storage, ts) if not due_all else "",
         }
 

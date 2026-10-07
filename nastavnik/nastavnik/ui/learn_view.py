@@ -23,7 +23,7 @@ from . import widgets as W
 from .board import BoardPanel
 from .chat import ChatInput, ChatView
 from .concept_map import ConceptMap
-from .pages import Page, bar, button, clear_layout, label
+from .pages import MASTERY_TIP, Page, button, clear_layout, label, progress_text, topic_bar
 
 
 class NewTopicDialog(QDialog):
@@ -121,11 +121,10 @@ class LearnPage(Page):
             card.add_layout(head)
             if t["goal"]:
                 card.add(label(t["goal"], "Muted"))
-            card.add(bar(p["mastered"] / max(1, p["total"])))
-            info = f"Освоено {p['mastered']} из {p['total']} · в процессе {p['learning']}"
-            if p["due"]:
-                info += f" · повторений сегодня {p['due']}"
-            card.add(label(info, "Meta"))
+            card.add(topic_bar(p))
+            info = label(progress_text(p), "Meta")
+            info.setToolTip(MASTERY_TIP)
+            card.add(info)
             self.body.addWidget(card)
 
     # ------------------------------------------------------------- тема
@@ -165,7 +164,8 @@ class LearnPage(Page):
         card.add_layout(row)
         self.body.addWidget(card)
         g = W.Group("Карта темы", "Наверху — с чего тема начинается, ниже — то, что на этом держится. "
-                                  "Синие — в процессе, зелёные — освоены.")
+                                  "Синие — пройдены и закрепляются повторением, зелёные — закреплены "
+                                  "(помните через три недели).")
         if concepts:
             self.map = ConceptMap()
             self.map.set_concepts(concepts)
@@ -200,7 +200,8 @@ class LearnPage(Page):
     def _concept_info(self, concept_id: int) -> None:
         c = self.c.storage.concept(concept_id)
         if c:
-            status = {"new": "впереди", "learning": "в процессе", "mastered": "освоено"}.get(c["status"], "")
+            status = {"new": "впереди", "learning": "пройдено, закрепляется повторением",
+                      "mastered": "закреплено"}.get(c["status"], "")
             self.c.toast(f"{c['title']} — {status}. {c['summary']}")
 
     def _menu(self, anchor, topic_id: int) -> None:

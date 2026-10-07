@@ -124,8 +124,8 @@ def state_block(storage, settings, topic_id: int) -> str:
         "[состояние темы]",
         f"Тема: {t['title']}. Цель: {t['goal'] or 'не указана'}. Уровень: {LEVELS.get(t['level'], t['level'])}.",
         f"Интересы человека: {settings.get('profile.interests', '') or 'не указаны'}.",
-        f"Освоено: {', '.join(by['mastered']) or 'пока ничего'}.",
-        f"В процессе: {', '.join(by['learning']) or 'нет'}.",
+        f"Закреплено (помнит через недели): {', '.join(by['mastered']) or 'пока ничего'}.",
+        f"Пройдено, закрепляется повторением: {', '.join(by['learning']) or 'нет'}.",
         f"Дальше по карте: {', '.join(by['new'][:6]) or 'карта пройдена'}.",
     ]
     if covered:

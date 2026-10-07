@@ -15,7 +15,7 @@ from . import widgets as W
 NODE_W = 132
 NODE_H = 44
 ROW_GAP = 34
-STATUS_LABELS = {"new": "впереди", "learning": "в процессе", "mastered": "освоено"}
+STATUS_LABELS = {"new": "впереди", "learning": "пройдено, закрепляется", "mastered": "закреплено"}
 
 
 def layout(concepts: list[dict], width: int) -> tuple[dict[str, QRectF], int]:

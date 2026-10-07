@@ -8,12 +8,13 @@ from __future__ import annotations
 import datetime as dt
 import time
 
-from PySide6.QtCore import QTime, Qt
+from PySide6.QtCore import QRectF, QTime, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
-                               QTimeEdit, QVBoxLayout, QWidget)
+                               QSizePolicy, QTimeEdit, QVBoxLayout, QWidget)
 
 from ..learn import bandit
-from ..util import minutes_text, plural
+from ..util import ahead_text, minutes_text, plural
 from . import widgets as W
 from .look import CONTENT_MAX_W
 
@@ -107,6 +108,55 @@ def bar(value: float, height: int = 6) -> QProgressBar:
     return pb
 
 
+MASTERY_TIP = ("Пройдено — понятие разобрали в сессии, засчитывается сразу.\n"
+               "Закреплено — вы его помните через время: все карточки держатся от трёх недель "
+               "и проверка через несколько дней сдана. Закрепляет «Повторение».")
+
+
+class ProgressBar(QWidget):
+    """Прогресс темы в два цвета: светлое — пройдено, сплошное зелёное — закреплено."""
+
+    def __init__(self, studied: float, mastered: float, height: int = 6):
+        super().__init__()
+        self.studied = max(0.0, min(1.0, studied))
+        self.mastered = max(0.0, min(self.studied, mastered))
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setToolTip(MASTERY_TIP)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        r = QRectF(self.rect())
+        rad = r.height() / 2
+        p.setBrush(W.pc("switch_off"))
+        p.drawRoundedRect(r, rad, rad)
+        for frac, color in ((self.studied, W.pc("accent")), (self.mastered, W.pc("success"))):
+            if frac > 0:
+                if color == W.pc("accent"):
+                    color.setAlpha(150)
+                p.setBrush(color)
+                p.drawRoundedRect(QRectF(r.x(), r.y(), max(r.height(), r.width() * frac), r.height()), rad, rad)
+        p.end()
+
+
+def topic_bar(p: dict) -> ProgressBar:
+    total = max(1, p["total"])
+    return ProgressBar(p["studied"] / total, p["mastered"] / total)
+
+
+def progress_text(p: dict, with_reviews: bool = True) -> str:
+    """«Пройдено 1 из 12 · закреплено 0 · следующее повторение через 3 дня»."""
+    parts = [f"Пройдено {p['studied']} из {p['total']}", f"закреплено {p['mastered']}"]
+    if with_reviews:
+        if p.get("due"):
+            parts.append(f"повторений сегодня {p['due']}")
+        elif p.get("next_review"):
+            parts.append(f"следующее повторение {ahead_text(p['next_review'])}")
+    return " · ".join(parts)
+
+
 def greeting(ts: float | None = None) -> str:
     h = time.localtime(ts).tm_hour if ts else time.localtime().tm_hour
     if 5 <= h < 12:
@@ -179,7 +229,7 @@ class HomePage(Page):
                  + (" · заморозка" if d["streak"]["frozen"] else "")),
                 (f"{round(d['week_min'])}", f"мин за неделю из {d['week_goal']}"),
                 (f"{round(d['retention'] * 100)} %" if d["retention"] is not None else "—", "прогноз удержания"),
-                (f"{d['mastered']}/{d['concepts']}", "понятий освоено")):
+                (f"{d['studied']}/{d['concepts']}", f"понятий пройдено · закреплено {d['mastered']}")):
             tile = W.Card("", "", padding=14)
             t = W.StatTile(caption)
             t.set(value)
@@ -310,9 +360,8 @@ class ProgressPage(Page):
                 bl = QVBoxLayout(box)
                 bl.setContentsMargins(0, 10, 0, 10)
                 p = t["progress"]
-                bl.addWidget(label(f"{t['title']} — освоено {p['mastered']} из {p['total']}, в процессе "
-                                   f"{p['learning']}"))
-                bl.addWidget(bar(p["mastered"] / max(1, p["total"])))
+                bl.addWidget(label(f"{t['title']} — {progress_text(p, with_reviews=False).lower()}"))
+                bl.addWidget(topic_bar(p))
                 g.add_widget(box)
             self.body.addWidget(g)
 

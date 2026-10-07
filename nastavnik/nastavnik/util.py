@@ -67,6 +67,21 @@ def minutes_text(minutes: float) -> str:
     return f"{h} ч {rest} мин" if rest else f"{h} ч"
 
 
+def ahead_text(ts: float, now_ts: float | None = None) -> str:
+    """Когда в будущем: «сегодня», «завтра», «через 3 дня», «10 окт.»."""
+    now_ts = now_ts or time.time()
+    days = int(round((day_start(ts) - day_start(now_ts)) / DAY))
+    if days <= 0:
+        return "сегодня"
+    if days == 1:
+        return "завтра"
+    if days < 7:
+        return f"через {days} {plural(days, ('день', 'дня', 'дней'))}"
+    months = ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."]
+    t = time.localtime(ts)
+    return f"{t.tm_mday} {months[t.tm_mon - 1]}"
+
+
 def slugify(text: str) -> str:
     """Короткий ключ понятия: латиница/кириллица, цифры и дефисы."""
     s = re.sub(r"[^0-9a-zа-яё]+", "-", (text or "").lower()).strip("-")

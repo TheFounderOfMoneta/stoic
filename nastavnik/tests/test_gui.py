@@ -485,3 +485,35 @@ def test_screenshots_of_all_screens(tmp_path, monkeypatch, theme):
     assert all(p.exists() for p in SHOTS.glob(f"*-{theme}.png"))
     close(c)
     st.close()
+
+
+def test_one_lesson_counts_as_studied_right_away(gui):
+    """После одного урока тема не должна выглядеть пустой: «пройдено 1», «закреплено» — после повторений."""
+    from nastavnik.ui.pages import ProgressBar
+    c, st, _ = gui
+    tid = topic_with_map(c)
+    c.start_learning(tid)
+    view = c.window.session_view
+    assert wait(lambda: not c.learn_busy and "Крючок" in chat_text(view))
+    send(view, "Пакеты идут разными путями", confidence=3)
+    assert wait(lambda: not c.learn_busy and "Верно" in chat_text(view))
+    view.end_btn.click()
+    assert wait(lambda: c.learn_phase == "rating" and hasattr(view, "stars"))
+    view.stars[3].click()
+    assert wait(lambda: c.learn_phase == "done")
+    p = engine.topic_progress(st, tid)
+    assert p["studied"] == 1 and p["mastered"] == 0 and p["next_review"] is not None
+    c.learn_close()
+    c.window.learn_page.show_list()
+    pump(0.2)
+    page = c.window.learn_page
+    text = texts(page.area)
+    assert "Пройдено 1 из 5 · закреплено 0" in text and "следующее повторение" in text
+    bars = [b for b in page.area.findChildren(ProgressBar) if b.isVisible()]
+    assert bars and bars[0].studied == 0.2 and bars[0].mastered == 0.0     # полоса не пустая
+    c.window.open_page("home")
+    pump(0.2)
+    assert "понятий пройдено · закреплено 0" in texts(c.window.home_page.area)
+    c.window.open_page("progress")
+    pump(0.2)
+    assert "пройдено 1 из 5 · закреплено 0" in texts(c.window.progress_page.area)

@@ -152,10 +152,15 @@ def topic_progress(storage, topic_id: int, ts: float | None = None) -> dict:
     for c in concepts:
         counts[c["status"]] = counts.get(c["status"], 0) + 1
     k = memory_factor(storage)
-    rs = [r for r in (fsrs.current_r(i, ts, k) for i in storage.items(topic_id=topic_id)) if r is not None]
+    items = storage.items(topic_id=topic_id)
+    rs = [r for r in (fsrs.current_r(i, ts, k) for i in items) if r is not None]
     due = len(storage.due_items(_end_of_day(ts), topic_id))
-    return {"total": len(concepts), **counts, "retention": sum(rs) / len(rs) if rs else None,
-            "due": due, "cards": len(rs)}
+    ahead = [i["due"] for i in items if i["due"] and i["due"] > _end_of_day(ts) and not i["suspended"]]
+    # «пройдено» — разобрали в сессии (засчитывается сразу); «освоено» (mastered) — закреплено:
+    # все карточки держатся от трёх недель и проверка через несколько дней сдана
+    return {"total": len(concepts), **counts, "studied": counts["learning"] + counts["mastered"],
+            "retention": sum(rs) / len(rs) if rs else None, "due": due, "cards": len(rs),
+            "next_review": min(ahead) if ahead else None}
 
 
 def retention_all(storage, ts: float | None = None) -> float | None:
