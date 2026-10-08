@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.ritm.app
 import app.ritm.data.NoteRow
 import app.ritm.data.TaskRow
@@ -78,10 +79,10 @@ fun TasksScreen(nav: Nav, undo: UndoState) {
     ).filter { it.second.isNotEmpty() }
 
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 32.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 48.dp, bottom = 140.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 48.dp, bottom = 140.dp)) {
             if (groups.isEmpty()) item { Text("Задач нет. Плюс внизу — добавить", style = T.dim) }
             groups.forEach { (title, list) ->
-                item(key = "h$title") { Text(title, style = T.dim, modifier = Modifier.padding(top = 24.dp, bottom = 4.dp)) }
+                item(key = "h$title") { Text(title, style = T.title.copy(fontSize = 15.sp, color = C.dim), modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 8.dp)) }
                 items(list, key = { it.id }) { t ->
                     val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
                         when (v) {
@@ -99,7 +100,7 @@ fun TasksScreen(nav: Nav, undo: UndoState) {
                         }
                     })
                     SwipeToDismissBox(state, backgroundContent = {}) {
-                        Row(Modifier.fillMaxWidth().tap { nav.go(Route.TaskEdit(t.id)) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).glass(16.dp).tap { nav.go(Route.TaskEdit(t.id)) }.padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(t.title, style = T.body, modifier = Modifier.weight(1f))
                             val d = t.date?.let(LocalDate::parse)
                             val label = listOfNotNull(d?.takeIf { it.isAfter(today.plusDays(1)) }?.format(dayMonth), t.time).joinToString(" ")
@@ -210,7 +211,7 @@ fun NotesScreen(nav: Nav, undo: UndoState) {
     var q by remember { mutableStateOf("") }
     val shown = notes.filter { q.isBlank() || it.text.contains(q.trim(), ignoreCase = true) }
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 32.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 140.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 140.dp)) {
             item {
                 BasicTextField(q, { q = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true,
                     decorationBox = { inner -> Box { if (q.isEmpty()) Text("Поиск", style = T.body.copy(color = C.hint)); inner() } },
@@ -238,7 +239,7 @@ fun NotesScreen(nav: Nav, undo: UndoState) {
 @Composable
 private fun NoteCard(n: NoteRow, onClick: () -> Unit) {
     val at = Instant.ofEpochMilli(n.at).atZone(ZoneId.systemDefault())
-    Column(Modifier.fillMaxWidth().tap(onClick).padding(vertical = 14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).glass(18.dp).tap(onClick).padding(horizontal = 16.dp, vertical = 14.dp)) {
         val head = when (n.kind) {
             "moment" -> "⚑ ${at.format(dateTimeFmt)}"
             "voice" -> "▶ ${(n.audioMs ?: 0) / 1000 / 60}:${String.format(Locale.US, "%02d", (n.audioMs ?: 0) / 1000 % 60)}"

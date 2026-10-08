@@ -48,30 +48,7 @@ sleep 4
 route workout 14-workout
 shot 15-home-during-workout 2
 
-# 5. Кнопка Bixby через службу спецвозможностей. В эмуляторе код Bixby (1082) недопустим,
-#    поэтому тестовая сборка слушает ещё и F12 — логика жестов та же.
-adb shell settings put secure enabled_accessibility_services $PKG/$PKG.button.ButtonService
-adb shell settings put secure accessibility_enabled 1
-sleep 5
-adb shell dumpsys accessibility | grep -i "ritm" | head -5
-adb shell am start -n $PKG/.ui.MainActivity > /dev/null; sleep 2
-adb shell input keyevent KEYCODE_F12 KEYCODE_F12 KEYCODE_F12   # три — отметка момента
-sleep 2
-adb shell input keyevent KEYCODE_F12 KEYCODE_F12               # два — еда (быстрый ввод)
-shot 16-bixby-double-food 3
-adb shell input keyevent KEYCODE_BACK; sleep 1
-adb shell input keyevent KEYCODE_F12                           # одно — «+» (или подход на тренировке)
-shot 16b-bixby-single 3
-adb shell input keyevent KEYCODE_BACK; sleep 1
-adb shell input keyevent --longpress KEYCODE_F12               # удержание — голосовая заметка
-sleep 3
-route notes 17-notes-after-bixby
-
-# 6. Экран блокировки: два нажатия при выключенном экране — еда поверх блокировки.
-adb shell input keyevent KEYCODE_SLEEP; sleep 3
-adb shell input keyevent KEYCODE_F12 KEYCODE_F12
-shot 18-locked-food 4
-adb shell input keyevent KEYCODE_BACK; sleep 1
+# 5. Кнопка Bixby в эмуляторе не проверяется: как и на S10, она не доходит до спецвозможностей.
 
 # 7. Шторка.
 adb shell input keyevent KEYCODE_WAKEUP; sleep 1

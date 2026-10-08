@@ -33,8 +33,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun Screens(nav: Nav, host: Host, undo: UndoState) {
     BackHandler { if (!nav.back()) host.done() }
-    AnimatedContent(nav.top, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(150)) }, label = "screen") { r ->
-        Box(Modifier.fillMaxSize().background(C.bg)) {
+    AmbientBackground()
+    AnimatedContent(nav.top, transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(160)) }, label = "screen") { r ->
+        Box(Modifier.fillMaxSize()) {
             when (r) {
                 Route.Home -> HomeScreen(nav, undo)
                 Route.Tasks -> if (host.quick) Unlock(host, r) else TasksScreen(nav, undo)

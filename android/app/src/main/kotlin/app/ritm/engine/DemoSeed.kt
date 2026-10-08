@@ -19,9 +19,8 @@ object DemoSeed {
         when (kind) {
             "seed" -> {
                 if (repo.settings.get().onboarded) return
-                // День начался 6 часов назад; в эмуляторе код Bixby недопустим — тестовая клавиша F12.
+                // День начался 6 часов назад — чтобы демо-еда попала в сегодняшний день.
                 repo.settings.setInstalledAt(System.currentTimeMillis() - 6 * 3600_000L)
-                repo.settings.setBixbyKeys(app.ritm.data.Prefs.DEFAULT_BIXBY_KEYS + android.view.KeyEvent.KEYCODE_F12)
                 repo.settings.setGoals("Похудеть до 78 кг, тренироваться 3 раза в неделю")
                 repo.settings.setBody(Sex.MALE, 181.0, LocalDate.of(1995, 7, 1))
                 repo.settings.setGoal(GoalType.LOSE, 0.5)

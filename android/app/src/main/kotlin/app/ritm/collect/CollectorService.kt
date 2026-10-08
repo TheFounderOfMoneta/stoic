@@ -81,6 +81,9 @@ class CollectorService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_TICK) lifecycleScope.launch { tick() }
+        // Запуск из открытого приложения — переподнять службу с микрофоном: тест показал, что тогда голос
+        // пишется и при выключенном экране, а без заранее поднятой службы микрофон отдаёт тишину.
+        else runCatching { goForeground() }
         return START_STICKY
     }
 

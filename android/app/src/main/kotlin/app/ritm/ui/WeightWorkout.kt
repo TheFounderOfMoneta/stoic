@@ -167,7 +167,7 @@ fun ExercisePickScreen(nav: Nav) {
         LaunchedEffect(list.isEmpty()) { if (list.isEmpty()) fr.requestFocus() }
         LazyColumn {
             items(list.filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }, key = { it.id }) { e ->
-                Text(e.name, style = T.title, modifier = Modifier.fillMaxWidth().tap { choose(e.name) }.padding(vertical = 14.dp))
+                Text(e.name, style = T.row, modifier = Modifier.fillMaxWidth().tap { choose(e.name) }.padding(vertical = 14.dp))
             }
         }
     }

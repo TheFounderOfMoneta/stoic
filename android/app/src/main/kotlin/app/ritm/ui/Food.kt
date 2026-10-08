@@ -129,7 +129,7 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
 
 @Composable
 private fun FoodRowLine(title: String, onClick: () -> Unit) {
-    Text(title, style = T.title, modifier = Modifier.fillMaxWidth().tap(onClick).padding(vertical = 14.dp))
+    Text(title, style = T.row, modifier = Modifier.fillMaxWidth().tap(onClick).padding(vertical = 14.dp))
 }
 
 /** Одна цифра — граммы. Подставлен мой прошлый раз или обычная порция. */

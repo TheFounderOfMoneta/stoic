@@ -65,7 +65,7 @@ import java.time.format.DateTimeFormatter
 
 @Composable
 private fun Page(title: String?, content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
         Gap(40.dp)
         if (title != null) { Text(title, style = T.title); Gap(24.dp) }
         content()
@@ -75,7 +75,7 @@ private fun Page(title: String?, content: @Composable () -> Unit) {
 
 @Composable
 private fun Item(title: String, why: String, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().tap(onClick).padding(vertical = 14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).glass(18.dp).tap(onClick).padding(horizontal = 18.dp, vertical = 14.dp)) {
         Text(title, style = T.body)
         Text(why, style = T.dim)
     }
@@ -349,7 +349,7 @@ private fun AdvancedPage() {
                 Text("Остаток в шторке виден без разблокировки", style = T.dim)
             }
             Switch(p.showOnLockScreen, { scope.launch { app.repo.settings.setShowOnLock(it) } },
-                colors = SwitchDefaults.colors(checkedTrackColor = C.accent, checkedThumbColor = androidx.compose.ui.graphics.Color.Black))
+                colors = SwitchDefaults.colors(checkedTrackColor = androidx.compose.ui.graphics.Color.White, checkedThumbColor = C.ink, uncheckedTrackColor = C.ghost, uncheckedBorderColor = C.glassLine))
         }
         Gap(16.dp)
         Text("Отдых между подходами", style = T.body)

@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,21 +59,28 @@ fun HomeScreen(nav: Nav, undo: UndoState) {
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Text("⋯", style = T.title.copy(color = C.hint), modifier = Modifier.align(Alignment.TopEnd).tap { nav.go(Route.Settings) }.padding(20.dp))
 
-        Column(Modifier.fillMaxSize().padding(top = 120.dp, bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            NowLine(state, nav)
-            Gap(8.dp)
+        Column(Modifier.fillMaxSize().padding(top = 72.dp, bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) { NowLine(state, nav) }
+            Gap(12.dp)
             val r = state.remaining
-            Column(Modifier.tap { nav.go(Route.FoodToday) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                if (r == null) {
-                    Text("—", style = T.huge.copy(color = C.hint))
-                    Text("ккал", style = T.dim)
-                } else {
-                    FlowingNumber(abs(r))
-                    Text(if (r >= 0) "ккал" else "сверх", style = T.dim)
+            val plan = state.plan
+            DayRing(
+                progress = if (plan != null && plan > 0) state.eaten.toFloat() / plan else 0f,
+                over = r != null && r < 0,
+                modifier = Modifier.size(248.dp).tap { nav.go(Route.FoodToday) },
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (r == null) {
+                        Text("—", style = T.huge.copy(color = C.hint))
+                        Text("ккал", style = T.dim)
+                    } else {
+                        FlowingNumber(abs(r))
+                        Text(if (r >= 0) "ккал осталось" else "ккал сверх", style = T.dim)
+                    }
                 }
             }
-            Gap(56.dp)
-            Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Gap(28.dp)
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 todays.take(5).forEach { t ->
                     TaskLine(t, onDone = {
                         scope.launch {
@@ -122,9 +131,9 @@ private fun NowLine(state: DayState, nav: Nav) {
 
 @Composable
 fun TaskLine(t: TaskRow, onDone: () -> Unit, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(22.dp).clip(CircleShape).background(C.ghost).tap(onDone))
-        Spacer(Modifier.size(16.dp))
+    Row(Modifier.fillMaxWidth().glass(16.dp).padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(20.dp).clip(CircleShape).border(1.5.dp, C.dim, CircleShape).tap(onDone))
+        Spacer(Modifier.size(14.dp))
         Text(t.title, style = T.body, modifier = Modifier.weight(1f).tap(onOpen), maxLines = 2)
         t.time?.let { Text(it, style = T.dim) }
     }
@@ -138,8 +147,13 @@ fun BottomBar(modifier: Modifier, onNotes: () -> Unit, onPlus: () -> Unit, onTas
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Outlined.Edit, "Заметки", tint = C.dim, modifier = Modifier.size(26.dp).tap(onNotes))
-        Box(Modifier.size(64.dp).clip(CircleShape).background(C.accent).tap(onPlus), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.Add, "Добавить", tint = Color.Black, modifier = Modifier.size(32.dp))
+        Box(
+            Modifier.size(64.dp)
+                .shadow(22.dp, CircleShape, ambientColor = C.glow, spotColor = C.glow)
+                .clip(CircleShape).background(Color.White).tap(onPlus),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.Add, "Добавить", tint = C.ink, modifier = Modifier.size(32.dp))
         }
         Icon(Icons.Outlined.CheckCircle, "Задачи", tint = C.dim, modifier = Modifier.size(26.dp).tap(onTasks))
     }

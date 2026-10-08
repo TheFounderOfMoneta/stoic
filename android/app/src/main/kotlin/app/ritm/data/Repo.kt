@@ -311,12 +311,13 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
         events.emit("note.save", n.at, newUid()) { put("uid", n.uid); put("kind", n.kind); put("text", n.text) }
     }
 
-    suspend fun addVoiceNote(file: File, durationMs: Long): NoteRow = withContext(Dispatchers.IO) {
+    suspend fun addVoiceNote(file: File, durationMs: Long, silent: Boolean = false): NoteRow = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val row = NoteRow(at = now, text = "", audioPath = file.absolutePath, audioMs = durationMs, kind = "voice", uid = newUid())
+        val text = if (silent) "Запись без звука: микрофон не дали в фоне. Откройте Ритм один раз — голос заработает" else ""
+        val row = NoteRow(at = now, text = text, audioPath = file.absolutePath, audioMs = durationMs, kind = "voice", uid = newUid())
         val id = db.notes().insert(row)
         val audio = android.util.Base64.encodeToString(file.readBytes(), android.util.Base64.NO_WRAP)
-        events.emit("note.voice", now, row.uid) { put("durationMs", durationMs); put("audioM4aBase64", audio) }
+        events.emit("note.voice", now, row.uid) { put("durationMs", durationMs); put("silent", silent); put("audioM4aBase64", audio) }
         row.copy(id = id)
     }
 
