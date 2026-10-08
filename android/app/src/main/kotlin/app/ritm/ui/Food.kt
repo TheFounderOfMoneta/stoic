@@ -1,6 +1,8 @@
 package app.ritm.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
@@ -148,8 +151,10 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
     val scope = rememberCoroutineScope()
     var product by remember { mutableStateOf<ProductRow?>(null) }
     var editing by remember { mutableStateOf<FoodRow?>(null) }
-    var grams by remember { mutableDoubleStateOf(100.0) }
-    var minutesAgo by remember { mutableIntStateOf(0) }
+    var grams by rememberSaveable { mutableDoubleStateOf(100.0) }
+    var minutesAgo by rememberSaveable { mutableIntStateOf(0) }
+    var initialGrams by rememberSaveable { mutableStateOf<Double?>(null) }
+    var done by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(productId, editFoodId) {
         val p = app.repo.db.food().product(productId)
@@ -157,10 +162,8 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
         val wake = app.day.state.value.wakeAt ?: 0
         val e = editFoodId?.let { id -> app.repo.db.food().food(wake, System.currentTimeMillis() + 1).firstOrNull { it.id == id } }
         editing = e
-        grams = e?.grams ?: p?.let { app.repo.defaultGrams(it) } ?: 100.0
+        if (initialGrams == null) grams = e?.grams ?: p?.let { app.repo.defaultGrams(it) } ?: 100.0
     }
-    var initialGrams by remember { mutableStateOf<Double?>(null) }
-    var done by remember { mutableStateOf(false) }
     LaunchedEffect(product) { if (product != null && initialGrams == null) initialGrams = grams }
     // Поменял граммы и вышел — записать (или сохранить правку).
     OnLeave {
@@ -168,6 +171,7 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
         val start = initialGrams ?: return@OnLeave
         if (done || kotlin.math.abs(grams - start) < 0.01) return@OnLeave
         val e = editing
+        done = true
         if (e != null) app.repo.updateFoodGrams(e, grams) else app.repo.addFood(pr, grams, System.currentTimeMillis() - minutesAgo * 60_000L)
         app.day.refresh()
     }
@@ -185,7 +189,9 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             WheelNumber(grams, { grams = it }, step = if (grams >= 100) 10.0 else 5.0, unit = "г", min = 1.0, max = 3000.0, style = T.huge)
         }
-        Text("${(p.kcal100 * grams / 100).roundToInt()} ккал", style = T.dim)
+        Text("${(p.kcal100 * grams / 100).roundToInt()} ккал", style = T.body)
+        macros(p, grams)?.let { Text(it, style = T.dim) }
+        Text("изменить продукт", style = T.dim.copy(color = C.accent), modifier = Modifier.tap { nav.go(Route.EditProduct(p.id)) }.padding(8.dp))
         Gap(24.dp)
         AccentButton(if (editing != null) "Сохранить" else "Записать", onClick = {
             done = true
@@ -207,50 +213,96 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
     }
 }
 
-/** Свой продукт: название и калорийность на 100 г. Остальное — по желанию. */
+/** Значения продукта на 100 г. */
+private data class ProductValues(val name: String, val kcal: Double, val protein: Double, val fat: Double, val carbs: Double)
+
+/**
+ * Форма продукта: название, калории и БЖУ на 100 г — все четыре строки сразу.
+ * Пока калории не трогали руками, они считаются из БЖУ: 4·Б + 9·Ж + 4·У.
+ */
+@Composable
+private fun ProductForm(
+    title: String,
+    initial: ProductValues,
+    button: String,
+    onChange: (ProductValues) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    var v by remember(initial) { mutableStateOf(initial) }
+    var kcalTouched by remember(initial) { mutableStateOf(initial.kcal > 0) }
+    fun update(n: ProductValues) {
+        val auto = if (!kcalTouched && (n.protein + n.fat + n.carbs) > 0) n.copy(kcal = Math.round(4 * n.protein + 9 * n.fat + 4 * n.carbs).toDouble()) else n
+        v = auto; onChange(auto)
+    }
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Gap(32.dp)
+        Text(title, style = T.title)
+        Gap(16.dp)
+        BasicTextField(v.name, { update(v.copy(name = it)) }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            decorationBox = { inner -> Box { if (v.name.isEmpty()) Text("Название", style = T.body.copy(color = C.hint)); inner() } },
+            modifier = Modifier.fillMaxWidth().glass(16.dp).padding(horizontal = 16.dp, vertical = 14.dp))
+        Gap(18.dp)
+        Text("На 100 г", style = T.dim)
+        Gap(6.dp)
+        NutrientRow("Калории") { WheelNumber(v.kcal, { kcalTouched = true; update(v.copy(kcal = it)) }, 5.0, "ккал", style = T.title, max = 950.0) }
+        NutrientRow("Белки") { WheelNumber(v.protein, { update(v.copy(protein = it)) }, 0.5, "г", decimals = 1, style = T.title, max = 100.0) }
+        NutrientRow("Жиры") { WheelNumber(v.fat, { update(v.copy(fat = it)) }, 0.5, "г", decimals = 1, style = T.title, max = 100.0) }
+        NutrientRow("Углеводы") { WheelNumber(v.carbs, { update(v.copy(carbs = it)) }, 0.5, "г", decimals = 1, style = T.title, max = 100.0) }
+        if (!kcalTouched) Text("Калории посчитаются из БЖУ сами — или введите вручную", style = T.dim.copy(color = C.hint), modifier = Modifier.padding(top = 8.dp))
+        Gap(28.dp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            AccentButton(button, enabled = v.name.isNotBlank(), onClick = onSubmit)
+        }
+        Gap(32.dp)
+    }
+}
+
+@Composable
+private fun NutrientRow(label: String, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp).glass(18.dp).padding(start = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = T.body, modifier = Modifier.weight(1f))
+        content()
+    }
+}
+
+/** Свой продукт. Ввёл и вышел — всё равно сохранится. */
 @Composable
 fun AddProductScreen(nav: Nav, name: String) {
-    val context = LocalContext.current
-    val app = context.app
+    val app = LocalContext.current.app
     val scope = rememberCoroutineScope()
-    var title by remember { mutableStateOf(name.replaceFirstChar { it.uppercase() }) }
-    var kcal by remember { mutableDoubleStateOf(100.0) }
-    var more by remember { mutableStateOf(false) }
-    var protein by remember { mutableDoubleStateOf(0.0) }
-    var fat by remember { mutableDoubleStateOf(0.0) }
-    var carbs by remember { mutableDoubleStateOf(0.0) }
+    val initial = remember { ProductValues(name.replaceFirstChar { it.uppercase() }, 0.0, 0.0, 0.0, 0.0) }
+    var values by remember { mutableStateOf(initial) }
     var created by remember { mutableStateOf(false) }
-    // Ввёл продукт и вышел — продукт всё равно сохранится в базе.
-    OnLeave {
-        if (created || title.isBlank()) return@OnLeave
-        app.repo.addOwnProduct(title, kcal, protein.takeIf { more }, fat.takeIf { more }, carbs.takeIf { more })
+    suspend fun create() = app.repo.addOwnProduct(values.name, values.kcal, values.protein.takeIf { it > 0 }, values.fat.takeIf { it > 0 }, values.carbs.takeIf { it > 0 })
+    OnLeave { if (!created && values.name.isNotBlank() && values.kcal > 0) { created = true; create() } }
+    ProductForm("Новый продукт", initial, "Добавить", onChange = { values = it }, onSubmit = {
+        created = true
+        scope.launch { val p = create(); nav.replace(Route.FoodAmount(p.id)) }
+    })
+}
+
+/** Правка продукта: калории и БЖУ. Сохраняется само при выходе. */
+@Composable
+fun EditProductScreen(nav: Nav, productId: Long) {
+    val app = LocalContext.current.app
+    val scope = rememberCoroutineScope()
+    var product by remember { mutableStateOf<ProductRow?>(null) }
+    LaunchedEffect(productId) { product = app.repo.product(productId) }
+    val p = product ?: return
+    val initial = remember(p.id) { ProductValues(p.name, p.kcal100, p.protein ?: 0.0, p.fat ?: 0.0, p.carbs ?: 0.0) }
+    var values by remember(p.id) { mutableStateOf(initial) }
+    var lastSaved by remember(p.id) { mutableStateOf(initial) }
+    suspend fun save() {
+        val v = values
+        if (v == lastSaved || v.name.isBlank()) return
+        lastSaved = v
+        app.repo.updateProduct(p, v.name, v.kcal, v.protein.takeIf { it > 0 }, v.fat.takeIf { it > 0 }, v.carbs.takeIf { it > 0 })
     }
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Gap(48.dp)
-        BasicTextField(title, { title = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent), singleLine = true, modifier = Modifier.fillMaxWidth())
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                WheelNumber(kcal, { kcal = it }, step = 5.0, unit = "ккал на 100 г", max = 950.0)
-                if (more) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WheelNumber(protein, { protein = it }, 0.5, "белки", decimals = 1, style = T.title, max = 100.0)
-                        WheelNumber(fat, { fat = it }, 0.5, "жиры", decimals = 1, style = T.title, max = 100.0)
-                        WheelNumber(carbs, { carbs = it }, 0.5, "углеводы", decimals = 1, style = T.title, max = 100.0)
-                    }
-                } else {
-                    Text("Белки, жиры, углеводы", style = T.dim, modifier = Modifier.tap { more = true }.padding(16.dp))
-                }
-            }
-        }
-        AccentButton("Добавить", enabled = title.isNotBlank(), onClick = {
-            created = true
-            scope.launch {
-                val p = app.repo.addOwnProduct(title, kcal, protein.takeIf { more }, fat.takeIf { more }, carbs.takeIf { more })
-                nav.replace(Route.FoodAmount(p.id))
-            }
-        })
-        Gap(48.dp)
-    }
+    OnLeave { save() }
+    ProductForm("Продукт", initial, "Сохранить", onChange = { values = it }, onSubmit = {
+        scope.launch { save(); nav.back() }
+    })
 }
 
 /** Еда за день — по касанию цифры. Свайп влево — удалить, касание — изменить граммы. */
@@ -268,6 +320,13 @@ fun FoodTodayScreen(nav: Nav, undo: UndoState) {
             Gap(32.dp)
             val plan = state.plan
             Text(if (plan != null) "${formatInt(state.eaten)} из ${formatInt(plan)}" else formatInt(state.eaten), style = T.title)
+            var products by remember { mutableStateOf<Map<Long, ProductRow>>(emptyMap()) }
+            LaunchedEffect(food) { products = app.repo.db.food().products(food.mapNotNull { it.productId }.distinct()).associateBy { it.id } }
+            val totals = food.mapNotNull { f -> products[f.productId]?.let { it to f.grams } }
+            if (totals.any { (p, _) -> p.protein != null || p.fat != null || p.carbs != null }) {
+                fun sum(sel: (ProductRow) -> Double?) = totals.sumOf { (p, g) -> (sel(p) ?: 0.0) * g / 100 }.roundToInt()
+                Text("Б ${sum { it.protein }} · Ж ${sum { it.fat }} · У ${sum { it.carbs }} г", style = T.dim)
+            }
             Gap(24.dp)
             LazyColumn(Modifier.weight(1f)) {
                 if (food.isEmpty()) item { Text("Сегодня ещё ничего не записано", style = T.dim) }
@@ -284,7 +343,7 @@ fun FoodTodayScreen(nav: Nav, undo: UndoState) {
                     SwipeToDismissBox(dismiss, backgroundContent = {}, enableDismissFromStartToEnd = false) {
                         Row(Modifier.fillMaxWidth().tap { f.productId?.let { nav.go(Route.FoodAmount(it, f.id)) } }.padding(vertical = 14.dp)) {
                             Text(f.name, style = T.body, modifier = Modifier.weight(1f))
-                            Text("${f.grams.roundToInt()} г · ${f.kcal.roundToInt()}", style = T.dim)
+                            Text("${f.grams.roundToInt()} г · ${f.kcal.roundToInt()} ккал", style = T.dim)
                         }
                     }
                 }
@@ -292,4 +351,11 @@ fun FoodTodayScreen(nav: Nav, undo: UndoState) {
         }
         UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp))
     }
+}
+
+/** «Б 12 · Ж 3 · У 40 г» на порцию, если у продукта есть БЖУ. */
+private fun macros(p: ProductRow, grams: Double): String? {
+    if (p.protein == null && p.fat == null && p.carbs == null) return null
+    fun v(x: Double?) = ((x ?: 0.0) * grams / 100).roundToInt()
+    return "Б ${v(p.protein)} · Ж ${v(p.fat)} · У ${v(p.carbs)} г"
 }

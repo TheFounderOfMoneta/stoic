@@ -166,6 +166,19 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
         row.copy(id = id)
     }
 
+    /** Правка продукта: название, калории и БЖУ на 100 г. Исправленный продукт становится «моим» — всплывает первым. */
+    suspend fun updateProduct(p: ProductRow, name: String, kcal100: Double, protein: Double?, fat: Double?, carbs: Double?) = withContext(Dispatchers.IO) {
+        val row = p.copy(name = name.trim().ifEmpty { p.name }, kcal100 = kcal100, protein = protein, fat = fat, carbs = carbs, own = true)
+        db.food().updateProduct(row)
+        events.emit("product.update") {
+            put("name", row.name); put("kcal100", kcal100)
+            protein?.let { put("protein100", it) }; fat?.let { put("fat100", it) }; carbs?.let { put("carbs100", it) }
+        }
+        row
+    }
+
+    suspend fun product(id: Long): ProductRow? = withContext(Dispatchers.IO) { db.food().product(id) }
+
     fun foodSince(from: Long): Flow<List<FoodRow>> = db.food().foodFlow(from)
 
     // ——— Вес ———

@@ -11,6 +11,7 @@ sealed interface Route {
     data object FoodPick : Route
     data class FoodAmount(val productId: Long, val editFoodId: Long? = null) : Route
     data class AddProduct(val name: String) : Route
+    data class EditProduct(val productId: Long) : Route
     data object FoodToday : Route
     data object Weight : Route
     data object Workout : Route

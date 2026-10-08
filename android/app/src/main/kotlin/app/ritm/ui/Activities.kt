@@ -34,7 +34,11 @@ import kotlinx.coroutines.launch
 fun Screens(nav: Nav, host: Host, undo: UndoState) {
     BackHandler { if (!nav.back()) host.done() }
     AmbientBackground()
+    // Состояние экранов в стеке сохраняется: ушёл вглубь и вернулся — введённое на месте.
+    val holder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     AnimatedContent(nav.top, transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(160)) }, label = "screen") { r ->
+        androidx.compose.runtime.CompositionLocalProvider(LocalNav provides nav, LocalRoute provides r) {
+        holder.SaveableStateProvider(System.identityHashCode(r)) {
         Box(Modifier.fillMaxSize()) {
             when (r) {
                 Route.Home -> HomeScreen(nav, undo)
@@ -47,6 +51,7 @@ fun Screens(nav: Nav, host: Host, undo: UndoState) {
                 Route.FoodPick -> FoodPickScreen(nav, host, undo)
                 is Route.FoodAmount -> FoodAmountScreen(nav, host, undo, r.productId, r.editFoodId)
                 is Route.AddProduct -> AddProductScreen(nav, r.name)
+                is Route.EditProduct -> EditProductScreen(nav, r.productId)
                 Route.Weight -> WeightScreen(host, undo)
                 Route.Workout -> WorkoutScreen(nav, host)
                 Route.ExercisePick -> ExercisePickScreen(nav)
@@ -54,6 +59,8 @@ fun Screens(nav: Nav, host: Host, undo: UndoState) {
                 is Route.NoteEdit -> if (host.quick && r.id != null) Unlock(host, r) else NoteEditScreen(r.id)
                 Route.Onboarding -> OnboardingScreen { nav.stack.clear(); nav.stack.add(Route.Home) }
             }
+        }
+        }
         }
     }
 }

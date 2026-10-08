@@ -429,15 +429,31 @@ fun UndoBar(state: UndoState, modifier: Modifier = Modifier) {
 @Composable
 fun Gap(h: Dp) = Spacer(Modifier.height(h))
 
+/** Текущий стек экранов и экран, который сейчас рисуется (для автосохранения). */
+val LocalNav = androidx.compose.runtime.staticCompositionLocalOf<Nav?> { null }
+val LocalRoute = androidx.compose.runtime.staticCompositionLocalOf<Route?> { null }
+
 /**
- * Автосохранение: когда уходишь с экрана (назад, домой, другой экран), выполняется save.
- * Работает в фоне приложения — экран уже закрыт, а запись всё равно доходит.
+ * Автосохранение. save срабатывает, когда экран закрыт (назад, другая вкладка) или приложение
+ * свёрнуто / экран погас. Переход вглубь (на экран поверх этого) ничего не сохраняет.
+ * Вызовы идут по очереди, поэтому save может пометить «уже сохранено» и не задвоить запись.
  */
 @Composable
 fun OnLeave(save: suspend () -> Unit) {
     val app = androidx.compose.ui.platform.LocalContext.current.app
+    val nav = LocalNav.current
+    val route = LocalRoute.current
     val latest by rememberUpdatedState(save)
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { app.scope.launch { latest() } }
+    val lock = remember { kotlinx.coroutines.sync.Mutex() }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        fun run() { app.scope.launch { lock.lock(); try { latest() } finally { lock.unlock() } } }
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) run() }
+        lifecycle.addObserver(obs)
+        onDispose {
+            lifecycle.removeObserver(obs)
+            val pushedOver = nav != null && route != null && nav.stack.any { it === route }
+            if (!pushedOver) run()
+        }
     }
 }

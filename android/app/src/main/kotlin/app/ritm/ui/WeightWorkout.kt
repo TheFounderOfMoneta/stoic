@@ -63,6 +63,7 @@ fun WeightScreen(host: Host, undo: UndoState) {
     OnLeave {
         val start = initial ?: return@OnLeave
         if (done || kotlin.math.abs(kg - start) < 0.05) return@OnLeave
+        done = true
         app.repo.addWeight(kg)
         app.day.refresh()
     }

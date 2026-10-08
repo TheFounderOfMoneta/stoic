@@ -145,6 +145,7 @@ fun TaskEditScreen(nav: Nav, host: Host, id: Long?) {
         if (e != null && e.title == text && e.date == date?.toString() && e.time == time) return@OnLeave
         val saved = if (e != null) e.copy(title = text, date = date?.toString(), time = time).also { app.repo.updateTask(it) }
         else app.repo.addTask(text, date, time)
+        if (e != null) existing = saved else { title = ""; added++ }
         TaskAlarms.cancel(context, saved.id)
         TaskAlarms.timeOf(saved.date, saved.time)?.let { TaskAlarms.schedule(context, saved.id, it) }
         app.day.refresh()

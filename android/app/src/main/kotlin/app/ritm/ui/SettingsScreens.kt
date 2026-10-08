@@ -269,7 +269,7 @@ private fun NewPlacePage(nav: Nav) {
     var done by remember { mutableStateOf(false) }
     OnLeave {
         val p = pending
-        if (!done && p != null && name.isNotBlank()) PlacesActions.savePending(context, p, name)
+        if (!done && p != null && name.isNotBlank()) { done = true; PlacesActions.savePending(context, p, name) }
     }
     Page("Как назвать это место?") {
         Chips(listOf("Дом" to "Дом", "Работа" to "Работа", "Зал" to "Зал"), name.takeIf { it in setOf("Дом", "Работа", "Зал") }, { name = it })
@@ -446,7 +446,7 @@ private fun SleepPage(nav: Nav) {
     var end by remember { mutableStateOf(s.interval.end) }
     var decided by remember { mutableStateOf(false) }
     OnLeave {
-        if (!decided && (start != s.interval.start || end != s.interval.end)) { app.repo.markSleep(start, end, "edited"); app.day.refresh() }
+        if (!decided && (start != s.interval.start || end != s.interval.end)) { decided = true; app.repo.markSleep(start, end, "edited"); app.day.refresh() }
     }
     fun t(ms: Long) = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(hm)
     Page("Спал с ${t(start)} до ${t(end)}?") {
