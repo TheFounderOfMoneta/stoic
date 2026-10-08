@@ -85,6 +85,7 @@ class DayModel(private val context: Context, private val repo: Repo) {
         val zone = ZoneId.systemDefault()
         val prefs = repo.settings.get()
         val db = repo.db
+        endStaleWorkout(now)
         val from = now - 16 * DAY
         val origin = maxOf(prefs.installedAt.takeIf { it > 0 } ?: from, from)
 
@@ -150,6 +151,20 @@ class DayModel(private val context: Context, private val repo: Repo) {
             weightCard = weightCard,
             lastWeightKg = weights.lastOrNull()?.kg,
         )
+    }
+
+    /**
+     * Тренировка вне зала завершается сама после 30 минут без подходов.
+     * Автоматическая (в зале) завершается при выходе; страховка — 4 часа.
+     */
+    private suspend fun endStaleWorkout(now: Long) {
+        val w = repo.db.workouts().active() ?: return
+        val last = repo.db.workouts().sets(w.id).lastOrNull()?.at ?: w.start
+        val limit = if (w.auto) 4 * HOUR else 30 * 60_000L
+        if (now - last > limit) {
+            repo.endWorkout(now)
+            WorkoutClock.clear(context)
+        }
     }
 
     private suspend fun sleepEstimates(from: Long, now: Long, zone: ZoneId): List<SleepEstimate> {

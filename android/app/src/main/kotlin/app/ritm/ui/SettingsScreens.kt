@@ -46,7 +46,7 @@ import app.ritm.button.ButtonService
 import app.ritm.collect.CollectorService
 import app.ritm.collect.LocationCollector
 import app.ritm.collect.PlacesActions
-import app.ritm.core.energy.Energy
+import app.ritm.core.energy.Body
 import app.ritm.core.energy.GoalType
 import app.ritm.core.energy.Sex
 import app.ritm.core.energy.WeightGoal
@@ -55,6 +55,7 @@ import app.ritm.data.PlaceRow
 import app.ritm.engine.Access
 import app.ritm.engine.Permissions
 import app.ritm.engine.formatInt
+import app.ritm.work.Work
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.put
 import java.time.Instant
@@ -158,7 +159,7 @@ fun BodyPage(nav: Nav?, onNext: (() -> Unit)? = null) {
         app.repo.lastWeight()?.let { weight = it.kg; hadWeight = true }
     }
     val birth = LocalDate.of(birthYear, 7, 1)
-    val norm = sex?.let { dailyPlan(app.ritm.core.energy.Body(it, height, birth), weight, LocalDate.now(), WeightGoal(goal, pace), null) }
+    val norm = sex?.let { dailyPlan(Body(it, height, birth), weight, LocalDate.now(), WeightGoal(goal, pace), null) }
     Page(if (onNext != null) "О себе" else "Тело и норма") {
         Chips(listOf(Sex.MALE to "Мужчина", Sex.FEMALE to "Женщина"), sex, { sex = it })
         Gap(24.dp)
@@ -289,7 +290,7 @@ private fun ServerPage(nav: Nav) {
         Gap(16.dp)
         Text("В очереди: $pending", style = T.dim)
         Gap(32.dp)
-        AccentButton("Сохранить", onClick = { scope.launch { app.repo.settings.setServer(url, token); app.ritm.work.Work.syncNow(app); nav.back() } })
+        AccentButton("Сохранить", onClick = { scope.launch { app.repo.settings.setServer(url, token); Work.syncNow(app); nav.back() } })
     }
 }
 

@@ -86,6 +86,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_ROUTE)?.let { routeOf(it)?.let(nav::go) }
+    }
+
     override fun onResume() {
         super.onResume()
         lifecycleScope.launch {

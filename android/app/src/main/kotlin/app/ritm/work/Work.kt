@@ -100,10 +100,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val repo = applicationContext.app.repo
         val bm = applicationContext.getSystemService(BatteryManager::class.java)
         val missing = Permissions.missing(applicationContext)
+        val pending = repo.db.outbox().pendingCount()
         repo.events.emit("heartbeat") {
             put("battery", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             put("charging", bm.isCharging)
-            put("pending", repo.db.outbox().pendingCount())
+            put("pending", pending)
             putJsonArray("missing") { missing.forEach { add(it.name) } }
             put("version", BuildConfigProxy.versionName(applicationContext))
         }
