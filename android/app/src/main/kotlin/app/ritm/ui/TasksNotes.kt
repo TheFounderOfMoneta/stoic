@@ -158,7 +158,7 @@ fun TaskEditScreen(nav: Nav, host: Host, id: Long?) {
             title, { title = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { commit() }),
-            decorationBox = { inner -> Box { if (title.isEmpty()) Text("Что сделать?", style = T.title.copy(color = C.faint)); inner() } },
+            decorationBox = { inner -> Box { if (title.isEmpty()) Text("Что сделать?", style = T.title.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxWidth().focusRequester(fr),
         )
         Gap(24.dp)
@@ -213,7 +213,7 @@ fun NotesScreen(nav: Nav, undo: UndoState) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 32.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 140.dp)) {
             item {
                 BasicTextField(q, { q = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true,
-                    decorationBox = { inner -> Box { if (q.isEmpty()) Text("Поиск", style = T.body.copy(color = C.faint)); inner() } },
+                    decorationBox = { inner -> Box { if (q.isEmpty()) Text("Поиск", style = T.body.copy(color = C.hint)); inner() } },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
             }
             if (notes.isEmpty()) item { Text("Удерживайте кнопку слева и говорите — заметка появится здесь", style = T.dim) }
@@ -289,7 +289,7 @@ fun NoteEditScreen(id: Long?) {
         BasicTextField(
             text, { text = it }, textStyle = T.body.copy(lineHeight = T.body.fontSize * 1.4f), cursorBrush = SolidColor(C.accent),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Мысль…", style = T.body.copy(color = C.faint)); inner() } },
+            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Мысль…", style = T.body.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxSize().focusRequester(fr),
         )
     }

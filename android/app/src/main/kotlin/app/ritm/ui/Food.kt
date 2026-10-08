@@ -75,7 +75,7 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
             cursorBrush = SolidColor(C.accent),
             singleLine = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            decorationBox = { inner -> Box { if (query.isEmpty()) Text("Найти…", style = T.title.copy(color = C.faint)); inner() } },
+            decorationBox = { inner -> Box { if (query.isEmpty()) Text("Найти…", style = T.title.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
         )
         Gap(16.dp)

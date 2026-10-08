@@ -125,7 +125,7 @@ fun GoalsPage(nav: Nav?, onNext: (() -> Unit)? = null) {
     Page("Чего хотите достичь?") {
         BasicTextField(text, { text = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Своими словами. Например: похудеть до 80 кг, выучить английский", style = T.body.copy(color = C.faint)); inner() } },
+            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Своими словами. Например: похудеть до 80 кг, выучить английский", style = T.body.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
         Gap(32.dp)
         AccentButton(if (onNext != null) "Дальше" else "Готово", onClick = {
@@ -238,7 +238,7 @@ private fun NewPlacePage(nav: Nav) {
         Chips(listOf("Дом" to "Дом", "Работа" to "Работа", "Зал" to "Зал"), name.takeIf { it in setOf("Дом", "Работа", "Зал") }, { name = it })
         Gap(16.dp)
         BasicTextField(name, { name = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent), singleLine = true,
-            decorationBox = { inner -> Box { if (name.isEmpty()) Text("Своё название", style = T.title.copy(color = C.faint)); inner() } })
+            decorationBox = { inner -> Box { if (name.isEmpty()) Text("Своё название", style = T.title.copy(color = C.hint)); inner() } })
         Gap(32.dp)
         AccentButton("Сохранить", enabled = name.isNotBlank() && pending != null, onClick = {
             val p = pending ?: return@AccentButton
@@ -283,7 +283,7 @@ private fun ServerPage(nav: Nav) {
         Text("Адрес", style = T.dim)
         BasicTextField(url, { url = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            decorationBox = { inner -> Box { if (url.isEmpty()) Text("https://…", style = T.body.copy(color = C.faint)); inner() } },
+            decorationBox = { inner -> Box { if (url.isEmpty()) Text("https://…", style = T.body.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
         Text("Ключ", style = T.dim)
         BasicTextField(token, { token = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
@@ -361,7 +361,7 @@ private fun AdvancedPage() {
         Gap(16.dp)
         val calib = if (p.calibrated) "Расход откалиброван (×${"%.2f".format(p.calibration)})" else "Расход расчётный — уточнится через 3 недели"
         Text(calib, style = T.dim)
-        Text("Версия ${BuildConfigProxy.versionName(context)}", style = T.dim.copy(color = C.faint))
+        Text("Версия ${BuildConfigProxy.versionName(context)}", style = T.dim.copy(color = C.hint))
         LaunchedEffect(Unit) { CollectorService.start(context) }
     }
 }

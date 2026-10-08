@@ -161,7 +161,7 @@ fun ExercisePickScreen(nav: Nav) {
             q, { q = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent), singleLine = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { if (q.isNotBlank()) choose(q) }),
-            decorationBox = { inner -> Box { if (q.isEmpty()) Text("Название упражнения", style = T.title.copy(color = C.faint)); inner() } },
+            decorationBox = { inner -> Box { if (q.isEmpty()) Text("Название упражнения", style = T.title.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).focusRequester(fr),
         )
         LaunchedEffect(list.isEmpty()) { if (list.isEmpty()) fr.requestFocus() }
