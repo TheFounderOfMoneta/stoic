@@ -64,3 +64,15 @@ jobs:
           name: screenshots
           path: shots/
           if-no-files-found: ignore
+      - name: Скриншоты и ошибки в лог (для просмотра без артефактов)
+        if: always()
+        run: |
+          sudo apt-get install -y -qq imagemagick > /dev/null 2>&1 || true
+          for f in shots/*.png; do
+            n=$(basename "$f" .png)
+            convert "$f" -resize 360x -quality 72 "/tmp/$n.jpg"
+            echo "SHOT-BEGIN $n"; base64 -w 0 "/tmp/$n.jpg"; echo; echo "SHOT-END $n"
+          done
+          echo "LOGCAT-BEGIN"
+          grep -E " (E|W) .*(ritm|Ritm)|app\.ritm" shots/logcat.txt | grep -vE "ResourcesCompat|OpenGLRenderer" | tail -150 || true
+          echo "LOGCAT-END"
