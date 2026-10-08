@@ -16,6 +16,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import app.ritm.BuildConfigProxy
 import app.ritm.app
 import app.ritm.core.energy.EnergyDay
 import app.ritm.core.energy.calibrate
@@ -104,7 +105,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             put("charging", bm.isCharging)
             put("pending", repo.db.outbox().pendingCount())
             putJsonArray("missing") { missing.forEach { add(it.name) } }
-            put("version", app.ritm.BuildConfigProxy.versionName(applicationContext))
+            put("version", BuildConfigProxy.versionName(applicationContext))
         }
     }
 
