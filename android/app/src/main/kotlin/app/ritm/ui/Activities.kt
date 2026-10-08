@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import app.ritm.app
 import app.ritm.collect.CollectorService
+import app.ritm.engine.DemoSeed
 import kotlinx.coroutines.launch
 
 /** Экраны по маршруту. Общие для приложения и быстрого ввода. */
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
             override fun needsUnlock(route: Route) {}
         }
         intent?.getStringExtra(EXTRA_ROUTE)?.let { routeOf(it)?.let(nav::go) }
+        intent?.getStringExtra(EXTRA_DEMO)?.let { kind -> lifecycleScope.launch { DemoSeed.run(this@MainActivity, kind) } }
         setContent {
             RitmTheme {
                 val prefs by app.repo.settings.flow.collectAsState(initial = null)
@@ -89,6 +91,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_ROUTE)?.let { routeOf(it)?.let(nav::go) }
+        intent.getStringExtra(EXTRA_DEMO)?.let { kind -> lifecycleScope.launch { DemoSeed.run(this@MainActivity, kind) } }
     }
 
     override fun onResume() {
@@ -101,6 +104,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ROUTE = "route"
+        const val EXTRA_DEMO = "demo"
     }
 }
 
