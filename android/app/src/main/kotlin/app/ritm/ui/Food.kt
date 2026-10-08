@@ -66,8 +66,15 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
         found = if (query.length >= 2) app.repo.searchProducts(query) else emptyList()
     }
 
+    val day by app.day.state.collectAsState()
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().statusBarsPadding().imePadding().padding(horizontal = 24.dp)) {
-        Gap(24.dp)
+        Gap(16.dp)
+        // Сколько осталось — видно сразу после записи, можно добавлять следующее.
+        day.remaining?.let { r ->
+            Text(if (r >= 0) "Осталось ${formatInt(r)} ккал" else "Сверх ${formatInt(-r)} ккал", style = T.dim.copy(color = C.text))
+        }
+        Gap(8.dp)
         BasicTextField(
             value = query,
             onValueChange = { query = it },
@@ -115,8 +122,7 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
                             scope.launch {
                                 val rows = app.repo.addCombo(c.row)
                                 app.day.refresh()
-                                undo.show("Записано") { scope.launch { rows.forEach { app.repo.deleteFood(it) }; app.day.refresh() } }
-                                host.done()
+                                undo.show("Записано · ${c.title.lowercase()}") { scope.launch { rows.forEach { app.repo.deleteFood(it) }; app.day.refresh() } }
                             }
                         }
                         is FoodChoice.Product -> FoodRowLine(c.title) { nav.go(Route.FoodAmount(c.row.id)) }
@@ -124,6 +130,8 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
                 }
             }
         }
+    }
+    UndoBar(undo, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp))
     }
 }
 
@@ -191,7 +199,7 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
                     val row = app.repo.addFood(p, grams, System.currentTimeMillis() - minutesAgo * 60_000L)
                     app.day.refresh()
                     undo.show("Записано · ${p.name.lowercase()}") { scope.launch { app.repo.deleteFood(row); app.day.refresh() } }
-                    host.done()
+                    host.done() // назад в список еды — можно сразу добавить следующее
                 }
             }
         })

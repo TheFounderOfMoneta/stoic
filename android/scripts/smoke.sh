@@ -78,6 +78,21 @@ route notes 03-notes
 route food-today 04-food-today
 route plus 05-plus
 route food 06-food-pick
+# Записал еду — остаёшься в списке еды, видно остаток и «Отменить».
+adb shell am start -n $PKG/.ui.MainActivity --es route food > /dev/null; sleep 3
+tap_text "Банан"
+tap_text "Записать"
+expect "Найти…" "Отменить"
+shot 06b-food-after-record 0
+adb shell input keyevent KEYCODE_BACK; sleep 1
+# Добавил задачу из вкладки задач — вернулся в задачи, а не на главную.
+adb shell am start -n $PKG/.ui.MainActivity --es route tasks > /dev/null; sleep 3
+tap_text "Задача"
+adb shell input text "Проверить%sритм"; adb shell input keyevent 66; sleep 1.5
+adb shell input keyevent KEYCODE_BACK; sleep 0.5; adb shell input keyevent KEYCODE_BACK; sleep 1.5
+expect "Проверить ритм" "Задачи"
+shot 06c-tasks-after-add 0
+adb shell input keyevent KEYCODE_BACK; sleep 1
 route weight 07-weight
 route settings 08-settings
 route page:body 09-body

@@ -73,7 +73,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val host = object : Host {
             override val quick = false
-            override fun done() { if (nav.stack.size > 1) nav.home() else finish() }
+            // «Готово» — назад туда, откуда пришёл (записал еду — снова список еды), а не на главную.
+            override fun done() { if (!nav.back()) finish() }
             override fun needsUnlock(route: Route) {}
         }
         intent?.getStringExtra(EXTRA_ROUTE)?.let { routeOf(it)?.let(nav::go) }
@@ -123,7 +124,7 @@ class QuickActivity : ComponentActivity() {
         nav = Nav(routeOf(intent?.getStringExtra(EXTRA_SCREEN) ?: PLUS) ?: Route.Plus)
         val host = object : Host {
             override val quick = true
-            override fun done() = finish()
+            override fun done() { if (!nav.back()) finish() }
             override fun needsUnlock(route: Route) {
                 val km = getSystemService(KeyguardManager::class.java)
                 val open = {
