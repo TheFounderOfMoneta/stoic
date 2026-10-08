@@ -37,9 +37,13 @@ object LogcatKeySource {
         val app = context.applicationContext
         thread(name = "ritm-bixby-log", isDaemon = true) {
             val decoder = BixbyLogDecoder()
+            // Читаем только строки после старта (без «последней старой» — она давала ложное нажатие),
+            // а после перезапуска чтения — с последней обработанной строки, чтобы ничего не потерять.
+            var since = System.currentTimeMillis()
             while (running) {
                 try {
-                    val p = ProcessBuilder("logcat", "-v", "epoch", "-T", "1", "-s", "$TAG:D").redirectErrorStream(true).start()
+                    val t = String.format(java.util.Locale.US, "%d.%03d", since / 1000, since % 1000)
+                    val p = ProcessBuilder("logcat", "-v", "epoch", "-T", t, "-s", "$TAG:D").redirectErrorStream(true).start()
                     proc = p
                     active.value = true
                     BufferedReader(InputStreamReader(p.inputStream)).useLines { lines ->
@@ -49,6 +53,8 @@ object LogcatKeySource {
                             val (sec, ms, _, msg) = m.destructured
                             val interactive = parseBixbyLine(msg) ?: continue
                             val epoch = sec.toLong() * 1000 + ms.toLong()
+                            if (epoch <= since - 1) continue
+                            since = epoch + 1
                             val edge = decoder.onLine(epoch, interactive) ?: continue
                             // Время события в шкале uptime: журнал пишет почти мгновенно, учитываем задержку чтения.
                             val uptime = SystemClock.uptimeMillis() - (System.currentTimeMillis() - epoch).coerceIn(0, 2_000)

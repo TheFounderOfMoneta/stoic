@@ -14,7 +14,8 @@ import kotlin.math.abs
  */
 class BixbyLogDecoder(
     private val timeoutMs: Long = 400,
-    private val timeoutToleranceMs: Long = 20,
+    /** Реальные служебные строки: 398–401 мс после отпускания. Узкий допуск — меньше шанс спутать с нажатием. */
+    private val timeoutToleranceMs: Long = 8,
     /** Если «нажата» дольше этого — потеряли строку, считаем, что отпущена. */
     private val stuckMs: Long = 120_000,
 ) {

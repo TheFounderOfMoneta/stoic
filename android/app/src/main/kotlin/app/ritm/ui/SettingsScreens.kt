@@ -43,10 +43,13 @@ import androidx.lifecycle.LifecycleEventObserver
 import app.ritm.BuildConfigProxy
 import app.ritm.app
 import app.ritm.button.ButtonBrain
+import app.ritm.button.ButtonService
 import app.ritm.button.LogcatKeySource
 import app.ritm.button.READ_LOGS_COMMAND
 import app.ritm.button.canReadLogs
 import app.ritm.collect.CollectorService
+import app.ritm.backup.Backup
+import app.ritm.voice.Transcriber
 import app.ritm.collect.LocationCollector
 import app.ritm.collect.PlacesActions
 import app.ritm.core.energy.Body
@@ -117,8 +120,9 @@ fun SettingsPageScreen(nav: Nav, page: String) {
         "place-new" -> NewPlacePage(nav)
         "button" -> ButtonPage()
         "server" -> ServerPage(nav)
-        "advanced" -> AdvancedPage()
+        "advanced" -> AdvancedPage(nav)
         "sleep" -> SleepPage(nav)
+        "diag" -> DiagPage()
     }
 }
 
@@ -236,14 +240,22 @@ private fun PlacesPage() {
                 var name by remember(p.id) { mutableStateOf(p.name) }
                 var radius by remember(p.id) { mutableDoubleStateOf(p.radius) }
                 var deleted by remember(p.id) { mutableStateOf(false) }
+                var gym by remember(p.id) { mutableStateOf(p.isGym) }
                 OnLeave {
-                    if (!deleted && name.isNotBlank() && (name.trim() != p.name || radius != p.radius)) {
-                        PlacesActions.update(context, p.copy(name = name.trim(), radius = radius))
+                    if (!deleted && name.isNotBlank() && (name.trim() != p.name || radius != p.radius || gym != p.isGym)) {
+                        PlacesActions.update(context, p.copy(name = name.trim(), radius = radius, isGym = gym))
                     }
                 }
                 Column(Modifier.padding(vertical = 12.dp)) {
                     BasicTextField(name, { name = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent), singleLine = true)
                     WheelNumber(radius, { radius = it }, 25.0, "радиус, м", style = T.title, min = 100.0, max = 1000.0)
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Здесь тренируюсь", style = T.body)
+                            Text("Тренировка начнётся сама через 5 минут", style = T.dim)
+                        }
+                        Switch(gym, { gym = it }, colors = SwitchDefaults.colors(checkedTrackColor = androidx.compose.ui.graphics.Color.White, checkedThumbColor = C.ink, uncheckedTrackColor = C.ghost, uncheckedBorderColor = C.glassLine))
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                         Text("Готово", style = T.body.copy(color = C.accent), modifier = Modifier.tap { editing = null }.padding(vertical = 8.dp))
                         Text("Удалить", style = T.body.copy(color = C.dim), modifier = Modifier.tap {
@@ -253,7 +265,7 @@ private fun PlacesPage() {
                     }
                 }
             } else {
-                Item(p.name, "радиус ${p.radius.toInt()} м") { editing = p }
+                Item(p.name, "радиус ${p.radius.toInt()} м" + if (p.isGym) " · здесь тренируюсь" else "") { editing = p }
             }
         }
     }
@@ -400,12 +412,33 @@ fun AccessList(onAllDone: (() -> Unit)? = null) {
 }
 
 @Composable
-private fun AdvancedPage() {
+private fun AdvancedPage(nav: Nav) {
     val context = LocalContext.current
     val app = context.app
     val scope = rememberCoroutineScope()
     val prefs by app.repo.settings.flow.collectAsState(initial = null)
+    val backupScope = rememberCoroutineScope()
+    var backupMsg by remember { mutableStateOf<String?>(null) }
+    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) backupScope.launch {
+            backupMsg = runCatching { Backup.restore(context, uri); "Восстановлено. Ритм закроется — откройте его снова" }
+                .getOrElse { "Не получилось: ${it.message}" }
+            if (backupMsg!!.startsWith("Восстановлено")) {
+                kotlinx.coroutines.delay(1_500)
+                (context as? android.app.Activity)?.finishAffinity()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
+    }
     Page("Дополнительно") {
+        Item("Проверка сбора", "Видно, что шаги, сон, места и кнопка правда собираются") { nav.go(Route.SettingsPage("diag")) }
+        TranscriptionItem()
+        Item("Сохранить копию", "Всё — в файл в «Загрузки/Ритм». Пригодится при смене телефона") {
+            backupScope.launch { backupMsg = runCatching { "Сохранено: Загрузки/Ритм/" + Backup.export(context) }.getOrElse { "Не получилось: ${it.message}" } }
+        }
+        Item("Восстановить из копии", "Заменит текущие данные данными из файла") { restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }
+        backupMsg?.let { Text(it, style = T.dim.copy(color = C.text), modifier = Modifier.padding(vertical = 8.dp)) }
+        Gap(16.dp)
         Text("Доступы", style = T.dim)
         AccessList()
         Gap(24.dp)
@@ -517,6 +550,83 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                 Gap(32.dp)
                 AccentButton(if (granted && recent.isNotEmpty()) "Начать" else if (granted) "Пропустить" else "Сделаю позже", onClick = { finish() })
             }
+        }
+    }
+}
+
+
+/** Проверка сбора: правда ли всё собирается. Зелёная галочка — да, «!» — посмотреть. */
+@Composable
+private fun DiagPage() {
+    val context = LocalContext.current
+    val app = context.app
+    val state by app.day.state.collectAsState()
+    val buttonActive by LogcatKeySource.active.collectAsState()
+    val touch by ButtonService.running.collectAsState()
+    var rows by remember { mutableStateOf<List<Triple<Boolean, String, String>>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            val db = app.repo.db
+            val steps = db.signals().stepsSince(now - 24 * 3600_000L)
+            val lastStep = db.signals().lastStepAt()
+            val fix = db.places().lastGood()
+            val place = fix?.placeId?.let { id -> db.places().places().firstOrNull { it.id == id }?.name }
+            val hb = db.outbox().lastOf("heartbeat")
+            val pending = db.outbox().pendingCount()
+            val prefs = app.repo.settings.get()
+            val tick = CollectorService.lastTickAt
+            val mic = CollectorService.micPromotedAt
+            val missing = Permissions.missing(context)
+            fun ago(t: Long?): String = if (t == null || t == 0L) "ещё не было" else when (val m = (now - t) / 60_000) {
+                in 0..0 -> "только что"; in 1..59 -> "$m мин назад"; in 60..1439 -> "${m / 60} ч назад"; else -> "${m / 1440} дн назад"
+            }
+            rows = listOf(
+                Triple(tick > 0 && now - tick < 20 * 60_000L, "Фоновая служба", "последний такт ${ago(tick)}"),
+                Triple(lastStep != null && now - lastStep < 6 * 3600_000L, "Шаги", "$steps за сутки · последние ${ago(lastStep)}"),
+                Triple(state.wakeAt != null, "Сон и день", state.wakeAt?.let { "день начался ${ago(it)}" } ?: "сна ещё не было — нужна ночь данных"),
+                Triple(fix != null && now - fix.time < 12 * 3600_000L, "Геопозиция", fix?.let { "точка ${ago(it.time)}" + (place?.let { p -> " · $p" } ?: "") } ?: "точек ещё нет"),
+                Triple(buttonActive, "Кнопка слева", if (buttonActive) "слушаю журнал" else if (canReadLogs(context)) "запускается" else "нужна команда с компьютера"),
+                Triple(mic > 0, "Голос кнопкой", if (mic > 0) "микрофон готов (${ago(mic)})" else "откройте Ритм после перезагрузки"),
+                Triple(touch, "Касания для сна", if (touch) "включено" else "включите в Спецвозможностях"),
+                Triple(hb != null && now - hb < 3 * 3600_000L, "Сигнал «жив»", "последний ${ago(hb)}"),
+                Triple(prefs.serverUrl.isNotBlank() && pending < 2_000, "Сервер", if (prefs.serverUrl.isBlank()) "не задан — данные копятся на телефоне ($pending)" else "отправлено ${ago(prefs.lastSyncAt)} · в очереди $pending"),
+                Triple(missing.isEmpty(), "Доступы", if (missing.isEmpty()) "все есть" else "нет: " + missing.joinToString { it.title.lowercase() }),
+            )
+            kotlinx.coroutines.delay(5_000)
+        }
+    }
+    Page("Проверка сбора") {
+        rows.forEach { (ok, title, detail) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).glass(16.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (ok) "✓" else "!", style = T.title.copy(color = if (ok) C.accent else C.over), modifier = Modifier.padding(end = 14.dp))
+                Column {
+                    Text(title, style = T.body)
+                    Text(detail, style = T.dim)
+                }
+            }
+        }
+    }
+}
+
+
+/** Расшифровка голоса: модель скачивается один раз (~45 МБ), дальше всё на телефоне без интернета. */
+@Composable
+private fun TranscriptionItem() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val progress by Transcriber.download.collectAsState()
+    var ready by remember { mutableStateOf(Transcriber.ready(context)) }
+    val why = when {
+        ready -> "Готово: голосовые заметки превращаются в текст прямо на телефоне"
+        progress == -1f -> "Не скачалось — нажмите ещё раз (нужен интернет)"
+        progress != null -> "Скачиваю… ${((progress ?: 0f) * 100).toInt()}%"
+        else -> "Скачать русскую модель (~45 МБ) — потом работает без интернета"
+    }
+    Item("Голос в текст", why) {
+        if (ready || (progress != null && progress != -1f)) return@Item
+        scope.launch {
+            if (Transcriber.downloadModel(context)) { ready = true; Transcriber.enqueueAll(context) }
         }
     }
 }

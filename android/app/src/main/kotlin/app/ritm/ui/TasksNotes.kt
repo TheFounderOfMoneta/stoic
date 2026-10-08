@@ -2,6 +2,11 @@ package app.ritm.ui
 
 import android.media.MediaPlayer
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -80,7 +85,8 @@ fun TasksScreen(nav: Nav, undo: UndoState) {
 
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 48.dp, bottom = 190.dp)) {
-            if (groups.isEmpty()) item { Text("Задач нет. Плюс внизу — добавить", style = T.dim) }
+            if (groups.isEmpty()) item { Text("Задач нет. Кнопка «Задача» внизу — добавить", style = T.dim) }
+            else item { Text("Кружок — сделано · смахнуть влево — удалить", style = T.dim.copy(color = C.hint), modifier = Modifier.padding(start = 4.dp)) }
             groups.forEach { (title, list) ->
                 item(key = "h$title") { Text(title, style = T.title.copy(fontSize = 15.sp, color = C.dim), modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 8.dp)) }
                 items(list, key = { it.id }) { t ->
@@ -101,6 +107,12 @@ fun TasksScreen(nav: Nav, undo: UndoState) {
                     })
                     SwipeToDismissBox(state, backgroundContent = {}) {
                         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).glass(16.dp).tap { nav.go(Route.TaskEdit(t.id)) }.padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                            // Кружок — сделано (как на главной). Свайп тоже работает.
+                            Box(Modifier.size(20.dp).clip(CircleShape).border(1.5.dp, C.dim, CircleShape).tap {
+                                scope.launch { app.repo.completeTask(t); TaskAlarms.cancel(context, t.id) }
+                                undo.show("Сделано") { scope.launch { app.repo.uncompleteTask(t) } }
+                            })
+                            Spacer(Modifier.size(14.dp))
                             Text(t.title, style = T.body, modifier = Modifier.weight(1f))
                             val d = t.date?.let(LocalDate::parse)
                             val label = listOfNotNull(d?.takeIf { it.isAfter(today.plusDays(1)) }?.format(dayMonth), t.time).joinToString(" ")

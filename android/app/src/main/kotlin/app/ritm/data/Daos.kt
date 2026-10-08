@@ -15,6 +15,7 @@ interface OutboxDao {
     @Query("SELECT COUNT(*) FROM outbox WHERE sent = 0") suspend fun pendingCount(): Int
     @Query("UPDATE outbox SET sent = 1 WHERE id IN (:ids)") suspend fun markSent(ids: List<String>)
     @Query("DELETE FROM outbox WHERE sent = 1 AND at < :before") suspend fun purgeSent(before: Long)
+    @Query("SELECT MAX(at) FROM outbox WHERE type = :type") suspend fun lastOf(type: String): Long?
 }
 
 @Dao
@@ -26,6 +27,7 @@ interface SignalDao {
     @Insert suspend fun insertPing(p: PingRow)
     @Query("SELECT MAX(at) FROM pings WHERE source = :source") suspend fun lastPing(source: String): Long?
     @Query("SELECT at FROM pings WHERE at >= :from ORDER BY at") suspend fun pings(from: Long): List<Long>
+    @Query("SELECT MAX(`end`) FROM steps") suspend fun lastStepAt(): Long?
 
     @Insert suspend fun insertSpan(s: SpanRow): Long
     @Query("UPDATE spans SET `end` = :end WHERE id = :id") suspend fun closeSpan(id: Long, end: Long)
@@ -67,7 +69,8 @@ interface FoodDao {
     @Query("SELECT COUNT(*) FROM products") suspend fun productCount(): Int
     @Query("SELECT * FROM products WHERE id = :id") suspend fun product(id: Long): ProductRow?
     @Query("SELECT * FROM products WHERE id IN (:ids)") suspend fun products(ids: List<Long>): List<ProductRow>
-    @Query("SELECT * FROM products WHERE name LIKE '%' || :q || '%' ORDER BY own DESC, uses DESC, length(name) LIMIT 40") suspend fun search(q: String): List<ProductRow>
+    @Query("SELECT * FROM products") suspend fun allProducts(): List<ProductRow>
+    @Query("SELECT * FROM products WHERE barcode = :code LIMIT 1") suspend fun byBarcode(code: String): ProductRow?
     @Query("SELECT * FROM products WHERE uses > 0 ORDER BY usedAt DESC LIMIT 30") suspend fun recent(): List<ProductRow>
 
     @Insert suspend fun insertCombo(c: ComboRow): Long
@@ -127,6 +130,7 @@ interface NoteDao {
     @Delete suspend fun delete(n: NoteRow)
     @Query("SELECT * FROM notes ORDER BY at DESC") fun allFlow(): Flow<List<NoteRow>>
     @Query("SELECT * FROM notes WHERE id = :id") suspend fun byId(id: Long): NoteRow?
+    @Query("SELECT * FROM notes WHERE kind = 'voice' AND audioPath IS NOT NULL AND text = ''") suspend fun untranscribed(): List<NoteRow>
 }
 
 @Dao

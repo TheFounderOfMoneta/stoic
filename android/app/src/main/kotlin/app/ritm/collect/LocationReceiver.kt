@@ -48,7 +48,7 @@ class LocationReceiver : BroadcastReceiver() {
         for (g in e.triggeringGeofences.orEmpty()) {
             val place = places.firstOrNull { it.id.toString() == g.requestId } ?: continue
             val kind = "place:${place.id}"
-            val isGym = place.name.contains("зал", ignoreCase = true)
+            val isGym = place.isGym
             when (e.geofenceTransition) {
                 Geofence.GEOFENCE_TRANSITION_ENTER -> writer.open(kind, now)
                 Geofence.GEOFENCE_TRANSITION_DWELL -> {

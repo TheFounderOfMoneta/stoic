@@ -1,5 +1,6 @@
 package app.ritm.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -48,6 +49,8 @@ data class PlaceRow(
     val lon: Double,
     val radius: Double = 200.0,
     val createdAt: Long,
+    /** Здесь тренируюсь: тренировка начинается сама через 5 минут. */
+    @ColumnInfo(defaultValue = "0") val isGym: Boolean = false,
 )
 
 @Entity(tableName = "stays", indices = [Index("start")])
@@ -69,6 +72,8 @@ data class ProductRow(
     val lastGrams: Double? = null,
     val usedAt: Long? = null,
     val uses: Int = 0,
+    /** Штрихкод (EAN), если продукт найден сканером. */
+    val barcode: String? = null,
 )
 
 @Entity(tableName = "combos")

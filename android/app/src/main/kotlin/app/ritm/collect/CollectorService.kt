@@ -102,6 +102,9 @@ class CollectorService : LifecycleService() {
         if (Permissions.granted(this, Access.MICROPHONE)) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         val n = Notifications.summary(this, app.day.state.value, true, null, null)
         startForeground(Notifications.ID_SUMMARY, n, types)
+        if (types and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0 &&
+            getSystemService(PowerManager::class.java).isInteractive
+        ) micPromotedAt = System.currentTimeMillis()
     }
 
     private suspend fun initialState() {
@@ -158,6 +161,7 @@ class CollectorService : LifecycleService() {
 
     private suspend fun tick() {
         val now = System.currentTimeMillis()
+        lastTickAt = now
         val repo = app.repo
         getSystemService(SensorManager::class.java).getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let {
             // Принудительно выгрузить накопленные шаги из буфера датчика.
@@ -217,6 +221,9 @@ class CollectorService : LifecycleService() {
 
     companion object {
         const val ACTION_TICK = "app.ritm.TICK"
+        @Volatile var lastTickAt = 0L
+        /** Когда служба последний раз поднималась с микрофоном при открытом приложении. */
+        @Volatile var micPromotedAt = 0L
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, CollectorService::class.java))

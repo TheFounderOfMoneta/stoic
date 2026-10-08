@@ -45,6 +45,9 @@ import app.ritm.data.FoodChoice
 import app.ritm.data.FoodRow
 import app.ritm.data.ProductRow
 import app.ritm.engine.formatInt
+import app.ritm.food.BarcodeScanner
+import app.ritm.food.OffProduct
+import app.ritm.food.OpenFoodFacts
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -65,8 +68,28 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
         choices = app.repo.foodSuggestions(now, app.day.state.value.wakeAt)
         combo = app.repo.comboSuggestion(now)
     }
+    var online by remember { mutableStateOf<List<OffProduct>>(emptyList()) }
+    var onlineState by remember { mutableStateOf("") }
+    var scanMsg by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(query) {
         found = if (query.length >= 2) app.repo.searchProducts(query) else emptyList()
+        online = emptyList(); onlineState = ""
+        // Своей базы мало — после паузы в наборе ищем в открытой базе продуктов.
+        if (query.trim().length >= 3) {
+            kotlinx.coroutines.delay(700)
+            onlineState = "Ищу в интернете…"
+            online = OpenFoodFacts.search(query)
+            onlineState = if (online.isEmpty()) "В интернете не нашлось" else ""
+        }
+    }
+    fun scan() = scope.launch {
+        scanMsg = null
+        val code = BarcodeScanner.scan(context) ?: return@launch
+        app.repo.productByBarcode(code)?.let { nav.go(Route.FoodAmount(it.id)); return@launch }
+        scanMsg = "Ищу штрихкод $code…"
+        val off = OpenFoodFacts.byBarcode(code)
+        if (off != null) { scanMsg = null; nav.go(Route.FoodAmount(app.repo.saveOffProduct(off).id)) }
+        else scanMsg = "Штрихкод $code не нашёлся — добавьте продукт вручную"
     }
 
     val day by app.day.state.collectAsState()
@@ -88,12 +111,25 @@ fun FoodPickScreen(nav: Nav, host: Host, undo: UndoState) {
             decorationBox = { inner -> Box { if (query.isEmpty()) Text("Найти…", style = T.title.copy(color = C.hint)); inner() } },
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
         )
-        Gap(16.dp)
+        Text("Сканировать штрихкод", style = T.body.copy(color = C.accent), modifier = Modifier.tap { scan() }.padding(vertical = 6.dp))
+        scanMsg?.let { Text(it, style = T.dim) }
+        Gap(10.dp)
         LazyColumn(Modifier.weight(1f)) {
             if (query.length >= 2) {
                 items(found, key = { "f${it.id}" }) { p -> FoodRowLine(p.name) { nav.go(Route.FoodAmount(p.id)) } }
+                if (online.isNotEmpty()) {
+                    item(key = "h-online") { Text("Из интернета (Open Food Facts)", style = T.dim, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)) }
+                    items(online, key = { "o${it.barcode}${it.title}" }) { o ->
+                        Row(Modifier.fillMaxWidth().tap { scope.launch { nav.go(Route.FoodAmount(app.repo.saveOffProduct(o).id)) } }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(o.title, style = T.body, modifier = Modifier.weight(1f), maxLines = 2)
+                            Text("${o.kcal.roundToInt()} ккал", style = T.dim)
+                        }
+                    }
+                }
+                if (onlineState.isNotEmpty()) item(key = "s-online") { Text(onlineState, style = T.dim.copy(color = C.hint), modifier = Modifier.padding(vertical = 8.dp)) }
                 item {
-                    Text("Добавить «${query.trim()}»", style = T.body.copy(color = C.accent),
+                    Text("+ Добавить «${query.trim()}» вручную", style = T.body.copy(color = C.accent),
                         modifier = Modifier.fillMaxWidth().tap { nav.go(Route.AddProduct(query.trim())) }.padding(vertical = 16.dp))
                 }
             } else {

@@ -8,12 +8,18 @@ import app.ritm.data.PlaceRow
 import app.ritm.engine.PendingPlace
 import kotlinx.serialization.json.put
 
+/** Название похоже на зал — сразу отметить «здесь тренируюсь» (потом можно переключить). */
+fun looksLikeGym(name: String): Boolean {
+    val n = name.lowercase()
+    return listOf("зал", "gym", "качалк", "фитнес", "fitness", "спорт", "тренаж").any { it in n }
+}
+
 /** Сохранение мест: таблица, геозоны, отпечаток окружения, события. */
 object PlacesActions {
     suspend fun savePending(context: Context, p: PendingPlace, name: String) {
         val repo = context.app.repo
         val now = System.currentTimeMillis()
-        val id = repo.db.places().insertPlace(PlaceRow(name = name.trim(), lat = p.lat, lon = p.lon, createdAt = now))
+        val id = repo.db.places().insertPlace(PlaceRow(name = name.trim(), lat = p.lat, lon = p.lon, createdAt = now, isGym = looksLikeGym(name)))
         repo.settings.setPendingPlace("")
         repo.events.emit("place.add", now) { put("id", id); put("name", name.trim()); put("lat", p.lat); put("lon", p.lon); put("radius", 200.0) }
         SignalWriter(repo).open("place:$id", now)
@@ -33,7 +39,7 @@ object PlacesActions {
     suspend fun update(context: Context, p: PlaceRow) {
         val repo = context.app.repo
         repo.db.places().updatePlace(p)
-        repo.events.emit("place.update") { put("id", p.id); put("name", p.name); put("radius", p.radius) }
+        repo.events.emit("place.update") { put("id", p.id); put("name", p.name); put("radius", p.radius); put("isGym", p.isGym) }
         LocationCollector.refreshGeofences(context)
     }
 

@@ -85,6 +85,11 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // Сканер штрихкодов от Google Play: готовый экран, без разрешения на камеру.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // Офлайн-распознавание речи (русская модель скачивается по кнопке).
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("com.alphacephei:vosk-android:0.3.47@aar")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

@@ -27,6 +27,7 @@ import androidx.lifecycle.lifecycleScope
 import app.ritm.app
 import app.ritm.collect.CollectorService
 import app.ritm.engine.DemoSeed
+import app.ritm.engine.Notifications
 import kotlinx.coroutines.launch
 
 /** Экраны по маршруту. Общие для приложения и быстрого ввода. */
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        Notifications.cancel(this, Notifications.ID_ALERT)
         lifecycleScope.launch {
             if (app.repo.settings.get().onboarded) CollectorService.start(this@MainActivity)
             app.day.refresh()

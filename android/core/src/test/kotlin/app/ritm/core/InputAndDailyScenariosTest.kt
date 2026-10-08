@@ -75,6 +75,8 @@ class InputAndDailyScenariosTest {
     @Test fun `строка сверху — по приоритету`() {
         assertEquals(NowItem.WORKOUT, nowLine(true, true, true, true, true))
         assertEquals(NowItem.WEIGHT, nowLine(false, false, true, true, true))
+        assertEquals(NowItem.WEIGHT, nowLine(false, true, true, false, false)) // доступ не настроен — вес всё равно виден
+        assertEquals(NowItem.PROBLEM, nowLine(false, true, false, true, false))
         assertEquals(NowItem.SLEEP_UNSURE, nowLine(false, false, false, false, true))
         assertNull(nowLine(false, false, false, false, false))
     }

@@ -1,6 +1,8 @@
 package app.ritm.data
 
 import android.content.Context
+import app.ritm.food.OffProduct
+import app.ritm.voice.Transcriber
 import app.ritm.core.food.FoodHit
 import app.ritm.core.food.suggestCombos
 import app.ritm.core.food.suggestFood
@@ -32,6 +34,9 @@ sealed interface FoodChoice {
 }
 
 val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+/** Нижний регистр, «ё» → «е», лишние пробелы — для поиска по-русски. */
+fun normalize(s: String): String = s.lowercase().replace('ё', 'е').replace(Regex("\\s+"), " ").trim()
 
 /**
  * Единственная точка записи данных. Каждая запись сразу кладётся в журнал событий для сервера.
@@ -87,7 +92,19 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
         return base
     }
 
-    suspend fun searchProducts(q: String): List<ProductRow> = withContext(Dispatchers.IO) { db.food().search(q.trim()) }
+    /**
+     * Поиск продуктов без учёта регистра и «ё» (SQLite так не умеет для кириллицы).
+     * Все слова запроса должны встретиться в названии: «греч вар» найдёт «Гречка варёная».
+     */
+    suspend fun searchProducts(q: String): List<ProductRow> = withContext(Dispatchers.IO) {
+        val words = normalize(q).split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return@withContext emptyList()
+        db.food().allProducts()
+            .filter { p -> val n = normalize(p.name); words.all { it in n } }
+            .sortedWith(compareByDescending<ProductRow> { normalize(it.name).startsWith(words.first()) }
+                .thenByDescending { it.own }.thenByDescending { it.uses }.thenBy { it.name.length })
+            .take(40)
+    }
 
     suspend fun comboKcal(c: ComboRow): Int {
         val items = json.decodeFromString<List<ComboItem>>(c.items)
@@ -178,6 +195,18 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
     }
 
     suspend fun product(id: Long): ProductRow? = withContext(Dispatchers.IO) { db.food().product(id) }
+
+    /** Продукт из открытой базы — в свою базу (повторно не дублируется). */
+    suspend fun saveOffProduct(o: OffProduct): ProductRow = withContext(Dispatchers.IO) {
+        o.barcode?.let { code -> db.food().byBarcode(code)?.let { return@withContext it } }
+        db.food().allProducts().firstOrNull { normalize(it.name) == normalize(o.title) }?.let { return@withContext it }
+        val row = ProductRow(name = o.title, kcal100 = o.kcal, protein = o.protein, fat = o.fat, carbs = o.carbs, own = true, barcode = o.barcode)
+        val id = db.food().insertProduct(row)
+        events.emit("product.add") { put("name", row.name); put("kcal100", o.kcal); put("source", "openfoodfacts"); o.barcode?.let { put("barcode", it) } }
+        row.copy(id = id)
+    }
+
+    suspend fun productByBarcode(code: String): ProductRow? = withContext(Dispatchers.IO) { db.food().byBarcode(code) }
 
     fun foodSince(from: Long): Flow<List<FoodRow>> = db.food().foodFlow(from)
 
@@ -336,6 +365,7 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
         val id = db.notes().insert(row)
         val audio = android.util.Base64.encodeToString(file.readBytes(), android.util.Base64.NO_WRAP)
         events.emit("note.voice", now, row.uid) { put("durationMs", durationMs); put("silent", silent); put("audioM4aBase64", audio) }
+        if (!silent) Transcriber.enqueue(context, id)
         row.copy(id = id)
     }
 

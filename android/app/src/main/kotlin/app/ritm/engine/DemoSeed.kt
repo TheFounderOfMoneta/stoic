@@ -3,6 +3,7 @@ package app.ritm.engine
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import app.ritm.app
+import app.ritm.data.DayFlagRow
 import app.ritm.core.energy.Sex
 import java.time.LocalDate
 
@@ -18,7 +19,7 @@ object DemoSeed {
         when (kind) {
             "seed" -> {
                 if (repo.db.days().flag("demo|seeded") != null) return
-                repo.db.days().setFlag(app.ritm.data.DayFlagRow("demo|seeded"))
+                repo.db.days().setFlag(DayFlagRow("demo|seeded"))
                 // День начался 6 часов назад — чтобы демо-еда попала в сегодняшний день.
                 repo.settings.setInstalledAt(System.currentTimeMillis() - 6 * 3600_000L)
                 repo.settings.setGoals("Похудеть до 78 кг, тренироваться 3 раза в неделю")
