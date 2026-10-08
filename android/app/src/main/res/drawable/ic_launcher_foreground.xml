@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Кольцо, заполненное на три четверти, и точка — «ритм дня». -->
+    <path android:fillColor="#00000000" android:strokeColor="#FF2C2C2E" android:strokeWidth="3"
+        android:pathData="M54,32a22,22 0,1 1,0 44a22,22 0,1 1,0 -44z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FF8FE3B8" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M54,32a22,22 0,1 1,-22 22" />
+    <path android:fillColor="#FF8FE3B8" android:pathData="M54,50a4,4 0,1 1,0 8a4,4 0,1 1,0 -8z" />
+</vector>
