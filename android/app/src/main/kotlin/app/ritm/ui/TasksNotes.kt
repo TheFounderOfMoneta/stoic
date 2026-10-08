@@ -79,7 +79,7 @@ fun TasksScreen(nav: Nav, undo: UndoState) {
     ).filter { it.second.isNotEmpty() }
 
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 48.dp, bottom = 140.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 48.dp, bottom = 190.dp)) {
             if (groups.isEmpty()) item { Text("Задач нет. Плюс внизу — добавить", style = T.dim) }
             groups.forEach { (title, list) ->
                 item(key = "h$title") { Text(title, style = T.title.copy(fontSize = 15.sp, color = C.dim), modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 8.dp)) }
@@ -110,8 +110,8 @@ fun TasksScreen(nav: Nav, undo: UndoState) {
                 }
             }
         }
-        BottomBar(Modifier.align(Alignment.BottomCenter), onNotes = { nav.replace(Route.Notes) }, onPlus = { nav.go(Route.TaskEdit()) }, onTasks = { nav.back() })
-        UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 104.dp))
+        BottomBar(Modifier.align(Alignment.BottomCenter), Tab.TASKS, "Задача", onPlus = { nav.go(Route.TaskEdit()) }, onTab = { nav.toTab(it) })
+        UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 150.dp))
     }
 }
 
@@ -137,10 +137,24 @@ fun TaskEditScreen(nav: Nav, host: Host, id: Long?) {
         fr.requestFocus()
     }
 
+    // Набранное, но не добавленное — сохранить при выходе с экрана.
+    OnLeave {
+        val text = title.trim()
+        val e = existing
+        if (text.isEmpty()) return@OnLeave
+        if (e != null && e.title == text && e.date == date?.toString() && e.time == time) return@OnLeave
+        val saved = if (e != null) e.copy(title = text, date = date?.toString(), time = time).also { app.repo.updateTask(it) }
+        else app.repo.addTask(text, date, time)
+        TaskAlarms.cancel(context, saved.id)
+        TaskAlarms.timeOf(saved.date, saved.time)?.let { TaskAlarms.schedule(context, saved.id, it) }
+        app.day.refresh()
+    }
+
     fun commit() {
         val text = title.trim()
         if (text.isEmpty()) return
         val e = existing
+        title = ""
         scope.launch {
             val saved = if (e != null) {
                 e.copy(title = text, date = date?.toString(), time = time).also { app.repo.updateTask(it) }
@@ -149,7 +163,7 @@ fun TaskEditScreen(nav: Nav, host: Host, id: Long?) {
             Notifications.cancelTask(context, saved.id)
             TaskAlarms.timeOf(saved.date, saved.time)?.let { TaskAlarms.schedule(context, saved.id, it) }
             app.day.refresh()
-            if (e != null) nav.back() else { title = ""; added++ }
+            if (e != null) { existing = saved; title = saved.title; nav.back() } else added++
         }
     }
 
@@ -211,7 +225,7 @@ fun NotesScreen(nav: Nav, undo: UndoState) {
     var q by remember { mutableStateOf("") }
     val shown = notes.filter { q.isBlank() || it.text.contains(q.trim(), ignoreCase = true) }
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 140.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 190.dp)) {
             item {
                 BasicTextField(q, { q = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true,
                     decorationBox = { inner -> Box { if (q.isEmpty()) Text("Поиск", style = T.body.copy(color = C.hint)); inner() } },
@@ -231,8 +245,8 @@ fun NotesScreen(nav: Nav, undo: UndoState) {
                 }
             }
         }
-        BottomBar(Modifier.align(Alignment.BottomCenter), onNotes = { nav.back() }, onPlus = { nav.go(Route.NoteEdit()) }, onTasks = { nav.replace(Route.Tasks) })
-        UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 104.dp))
+        BottomBar(Modifier.align(Alignment.BottomCenter), Tab.NOTES, "Заметка", onPlus = { nav.go(Route.NoteEdit()) }, onTab = { nav.toTab(it) })
+        UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 150.dp))
     }
 }
 

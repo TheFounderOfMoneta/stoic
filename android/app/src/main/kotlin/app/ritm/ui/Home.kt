@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -60,7 +61,7 @@ fun HomeScreen(nav: Nav, undo: UndoState) {
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Text("⋯", style = T.title.copy(color = C.hint), modifier = Modifier.align(Alignment.TopEnd).tap { nav.go(Route.Settings) }.padding(20.dp))
 
-        Column(Modifier.fillMaxSize().padding(top = 72.dp, bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(top = 64.dp, bottom = 160.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) { NowLine(state, nav) }
             Gap(12.dp)
             val r = state.remaining
@@ -93,13 +94,8 @@ fun HomeScreen(nav: Nav, undo: UndoState) {
             }
         }
 
-        BottomBar(
-            modifier = Modifier.align(Alignment.BottomCenter),
-            onNotes = { nav.go(Route.Notes) },
-            onPlus = { nav.go(Route.Plus) },
-            onTasks = { nav.go(Route.Tasks) },
-        )
-        UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 104.dp))
+        BottomBar(Modifier.align(Alignment.BottomCenter), Tab.TODAY, "Добавить", onPlus = { nav.go(Route.Plus) }, onTab = { nav.toTab(it) })
+        UndoBar(undo, Modifier.align(Alignment.BottomCenter).padding(bottom = 150.dp))
     }
 }
 
@@ -142,24 +138,50 @@ fun TaskLine(t: TaskRow, onDone: () -> Unit, onOpen: () -> Unit) {
     }
 }
 
+enum class Tab { TODAY, TASKS, NOTES }
+
+/**
+ * Низ экрана: понятная кнопка действия с подписью и вкладки «Сегодня · Задачи · Заметки».
+ */
 @Composable
-fun BottomBar(modifier: Modifier, onNotes: () -> Unit, onPlus: () -> Unit, onTasks: () -> Unit) {
-    Row(
-        modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 20.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Outlined.Edit, "Заметки", tint = C.dim, modifier = Modifier.size(26.dp).tap(onNotes))
-        Box(
-            Modifier.size(64.dp)
-                .shadow(22.dp, CircleShape, ambientColor = C.glow, spotColor = C.glow)
-                .clip(CircleShape).background(Color.White).tap(onPlus),
-            contentAlignment = Alignment.Center,
+fun BottomBar(modifier: Modifier, current: Tab, plusLabel: String, onPlus: () -> Unit, onTab: (Tab) -> Unit) {
+    Column(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            Modifier
+                .shadow(20.dp, RoundedCornerShape(28.dp), ambientColor = C.glow, spotColor = C.glow)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.White)
+                .tap(onPlus)
+                .padding(start = 18.dp, end = 24.dp, top = 14.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Add, "Добавить", tint = C.ink, modifier = Modifier.size(32.dp))
+            Icon(Icons.Rounded.Add, null, tint = C.ink, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(plusLabel, style = T.body.copy(color = C.ink, fontWeight = androidx.compose.ui.text.font.FontWeight(600)))
         }
-        Icon(Icons.Outlined.CheckCircle, "Задачи", tint = C.dim, modifier = Modifier.size(26.dp).tap(onTasks))
+        Gap(12.dp)
+        Row(Modifier.fillMaxWidth().glass(22.dp).padding(4.dp)) {
+            listOf(Tab.TODAY to "Сегодня", Tab.TASKS to "Задачи", Tab.NOTES to "Заметки").forEach { (tab, label) ->
+                val on = tab == current
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(18.dp))
+                        .background(if (on) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+                        .tap { if (!on) onTab(tab) }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, style = T.body.copy(color = if (on) C.text else C.dim, fontWeight = androidx.compose.ui.text.font.FontWeight(if (on) 600 else 500)))
+                }
+            }
+        }
     }
+}
+
+/** Переходы между вкладками: «Сегодня» — главный экран, остальные — поверх него. */
+fun Nav.toTab(tab: Tab) = when (tab) {
+    Tab.TODAY -> home()
+    Tab.TASKS -> { home(); go(Route.Tasks) }
+    Tab.NOTES -> { home(); go(Route.Notes) }
 }
 
 /** «+»: пять слов, без иконок. */

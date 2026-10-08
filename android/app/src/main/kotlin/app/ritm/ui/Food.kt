@@ -151,6 +151,18 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
         editing = e
         grams = e?.grams ?: p?.let { app.repo.defaultGrams(it) } ?: 100.0
     }
+    var initialGrams by remember { mutableStateOf<Double?>(null) }
+    var done by remember { mutableStateOf(false) }
+    LaunchedEffect(product) { if (product != null && initialGrams == null) initialGrams = grams }
+    // Поменял граммы и вышел — записать (или сохранить правку).
+    OnLeave {
+        val pr = product ?: return@OnLeave
+        val start = initialGrams ?: return@OnLeave
+        if (done || kotlin.math.abs(grams - start) < 0.01) return@OnLeave
+        val e = editing
+        if (e != null) app.repo.updateFoodGrams(e, grams) else app.repo.addFood(pr, grams, System.currentTimeMillis() - minutesAgo * 60_000L)
+        app.day.refresh()
+    }
     val p = product ?: return
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Gap(96.dp)
@@ -168,6 +180,7 @@ fun FoodAmountScreen(nav: Nav, host: Host, undo: UndoState, productId: Long, edi
         Text("${(p.kcal100 * grams / 100).roundToInt()} ккал", style = T.dim)
         Gap(24.dp)
         AccentButton(if (editing != null) "Сохранить" else "Записать", onClick = {
+            done = true
             scope.launch {
                 val e = editing
                 if (e != null) {
@@ -198,6 +211,12 @@ fun AddProductScreen(nav: Nav, name: String) {
     var protein by remember { mutableDoubleStateOf(0.0) }
     var fat by remember { mutableDoubleStateOf(0.0) }
     var carbs by remember { mutableDoubleStateOf(0.0) }
+    var created by remember { mutableStateOf(false) }
+    // Ввёл продукт и вышел — продукт всё равно сохранится в базе.
+    OnLeave {
+        if (created || title.isBlank()) return@OnLeave
+        app.repo.addOwnProduct(title, kcal, protein.takeIf { more }, fat.takeIf { more }, carbs.takeIf { more })
+    }
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Gap(48.dp)
         BasicTextField(title, { title = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent), singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -216,6 +235,7 @@ fun AddProductScreen(nav: Nav, name: String) {
             }
         }
         AccentButton("Добавить", enabled = title.isNotBlank(), onClick = {
+            created = true
             scope.launch {
                 val p = app.repo.addOwnProduct(title, kcal, protein.takeIf { more }, fat.takeIf { more }, carbs.takeIf { more })
                 nav.replace(Route.FoodAmount(p.id))

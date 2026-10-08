@@ -54,14 +54,24 @@ fun WeightScreen(host: Host, undo: UndoState) {
     val scope = rememberCoroutineScope()
     var kg by remember { mutableDoubleStateOf(app.day.state.value.lastWeightKg ?: 75.0) }
     var loaded by remember { mutableStateOf(app.day.state.value.lastWeightKg != null) }
+    var initial by remember { mutableStateOf<Double?>(if (loaded) kg else null) }
+    var done by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!loaded) { app.repo.lastWeight()?.let { kg = it.kg }; loaded = true }
+        if (!loaded) { app.repo.lastWeight()?.let { kg = it.kg }; loaded = true; initial = kg }
+    }
+    // Поменял вес и вышел — записать.
+    OnLeave {
+        val start = initial ?: return@OnLeave
+        if (done || kotlin.math.abs(kg - start) < 0.05) return@OnLeave
+        app.repo.addWeight(kg)
+        app.day.refresh()
     }
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             WheelNumber(kg, { kg = it }, step = 0.1, unit = "кг", decimals = 1, min = 30.0, max = 250.0, style = T.huge, stepDp = 14.dp)
         }
         AccentButton("Записать", onClick = {
+            done = true
             scope.launch {
                 val w = app.repo.addWeight(kg)
                 app.day.refresh()

@@ -15,6 +15,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.foundation.layout.fillMaxSize
 import app.ritm.R
+import app.ritm.app
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -300,6 +302,8 @@ fun WheelNumber(
                 onValueChange = { v ->
                     val clean = v.text.filter { c -> c.isDigit() || ((c == ',' || c == '.') && decimals > 0) }.take(7)
                     tf = if (clean == v.text) v else TextFieldValue(clean, TextRange(clean.length))
+                    // Значение уходит наверх сразу при наборе — ничего не теряется, даже если сразу выйти с экрана.
+                    clean.replace(',', '.').toDoubleOrNull()?.takeIf { it in min..max }?.let { commitChange(it) }
                 },
                 textStyle = style.copy(textAlign = TextAlign.Center, color = C.accent),
                 cursorBrush = SolidColor(Color.White),
@@ -424,3 +428,16 @@ fun UndoBar(state: UndoState, modifier: Modifier = Modifier) {
 
 @Composable
 fun Gap(h: Dp) = Spacer(Modifier.height(h))
+
+/**
+ * Автосохранение: когда уходишь с экрана (назад, домой, другой экран), выполняется save.
+ * Работает в фоне приложения — экран уже закрыт, а запись всё равно доходит.
+ */
+@Composable
+fun OnLeave(save: suspend () -> Unit) {
+    val app = androidx.compose.ui.platform.LocalContext.current.app
+    val latest by rememberUpdatedState(save)
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { app.scope.launch { latest() } }
+    }
+}

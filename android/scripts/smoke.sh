@@ -48,6 +48,15 @@ tap_text "Дальше"
 shot 00f-button 2
 tap_text "Сделаю позже"
 shot 00g-home-after-onboarding 3
+expect "Сегодня" "Задачи" "Заметки" "Добавить"
+# Автосохранение: открыть «Тело», поменять вес с клавиатуры и сразу выйти назад — вес должен остаться.
+adb shell am start -n $PKG/.ui.MainActivity --es route page:body > /dev/null; sleep 3
+tap_text "82,4" && { adb shell input text 83.1; sleep 0.5; }
+adb shell input keyevent KEYCODE_BACK; sleep 0.5; adb shell input keyevent KEYCODE_BACK; sleep 1.5
+adb shell am start -n $PKG/.ui.MainActivity --es route page:body > /dev/null; sleep 3
+expect "83,1"
+shot 00h-body-autosaved 1
+adb shell input keyevent KEYCODE_BACK; sleep 1
 
 # Доступы, которые можно выдать с компьютера (как сделает человек кнопками).
 for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION ACCESS_BACKGROUND_LOCATION ACTIVITY_RECOGNITION RECORD_AUDIO; do

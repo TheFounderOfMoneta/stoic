@@ -126,8 +126,17 @@ fun SettingsPageScreen(nav: Nav, page: String) {
 fun GoalsPage(nav: Nav?, onNext: (() -> Unit)? = null) {
     val app = LocalContext.current.app
     val scope = rememberCoroutineScope()
-    var text by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { text = app.repo.settings.get().goals }
+    var text by rememberSaveable { mutableStateOf("") }
+    var saved by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { if (saved == null) { text = app.repo.settings.get().goals; saved = text } }
+    suspend fun save() {
+        val t = text.trim()
+        if (saved == null || t == saved) return
+        app.repo.settings.setGoals(t)
+        app.repo.events.emit("profile.goals") { put("text", t) }
+        saved = t
+    }
+    OnLeave { save() }
     Page("Чего хотите достичь?") {
         BasicTextField(text, { text = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -136,8 +145,7 @@ fun GoalsPage(nav: Nav?, onNext: (() -> Unit)? = null) {
         Gap(32.dp)
         AccentButton(if (onNext != null) "Дальше" else "Готово", onClick = {
             scope.launch {
-                app.repo.settings.setGoals(text.trim())
-                app.repo.events.emit("profile.goals") { put("text", text.trim()) }
+                save()
                 onNext?.invoke() ?: nav?.back()
             }
         })
@@ -168,6 +176,21 @@ fun BodyPage(nav: Nav?, onNext: (() -> Unit)? = null) {
         loaded = true
     }
     val birth = LocalDate.of(birthYear, 7, 1)
+    var savedBody by rememberSaveable { mutableStateOf("") }
+    suspend fun save() {
+        val s = sex ?: return
+        if (!loaded) return
+        val key = "$s|$height|$birthYear|$weight"
+        if (key == savedBody) return
+        app.repo.settings.setBody(s, height, birth)
+        app.repo.settings.setGoal(GoalType.KEEP, 0.0)
+        if (savedWeight == null || kotlin.math.abs(savedWeight!! - weight) > 0.05) { app.repo.addWeight(weight); savedWeight = weight }
+        app.repo.events.emit("profile.body") { put("sex", s.name); put("heightCm", height); put("birthYear", birthYear) }
+        savedBody = key
+        app.day.refresh()
+    }
+    // Всё введённое сохраняется само при выходе с экрана.
+    OnLeave { save() }
     val bmr = sex?.let { Energy.bmrPerDay(Body(it, height, birth), weight, LocalDate.now()).roundToInt() }
     Page(if (onNext != null) "О себе" else "Тело") {
         Chips(listOf(Sex.MALE to "Мужчина", Sex.FEMALE to "Женщина"), sex, { sex = it })
@@ -185,17 +208,7 @@ fun BodyPage(nav: Nav?, onNext: (() -> Unit)? = null) {
         }
         Gap(32.dp)
         AccentButton(if (onNext != null) "Дальше" else "Готово", enabled = sex != null, onClick = {
-            val s = sex ?: return@AccentButton
-            scope.launch {
-                app.repo.settings.setBody(s, height, birth)
-                app.repo.settings.setGoal(GoalType.KEEP, 0.0)
-                if (savedWeight == null || kotlin.math.abs(savedWeight!! - weight) > 0.05) { app.repo.addWeight(weight); savedWeight = weight }
-                app.repo.events.emit("profile.body") {
-                    put("sex", s.name); put("heightCm", height); put("birthYear", birthYear)
-                }
-                app.day.refresh()
-                onNext?.invoke() ?: nav?.back()
-            }
+            scope.launch { save(); onNext?.invoke() ?: nav?.back() }
         })
     }
 }
@@ -222,14 +235,19 @@ private fun PlacesPage() {
             if (editing?.id == p.id) {
                 var name by remember(p.id) { mutableStateOf(p.name) }
                 var radius by remember(p.id) { mutableDoubleStateOf(p.radius) }
+                var deleted by remember(p.id) { mutableStateOf(false) }
+                OnLeave {
+                    if (!deleted && name.isNotBlank() && (name.trim() != p.name || radius != p.radius)) {
+                        PlacesActions.update(context, p.copy(name = name.trim(), radius = radius))
+                    }
+                }
                 Column(Modifier.padding(vertical = 12.dp)) {
                     BasicTextField(name, { name = it }, textStyle = T.title, cursorBrush = SolidColor(C.accent), singleLine = true)
                     WheelNumber(radius, { radius = it }, 25.0, "радиус, м", style = T.title, min = 100.0, max = 1000.0)
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        Text("Сохранить", style = T.body.copy(color = C.accent), modifier = Modifier.tap {
-                            scope.launch { PlacesActions.update(context, p.copy(name = name.trim(), radius = radius)); editing = null }
-                        }.padding(vertical = 8.dp))
+                        Text("Готово", style = T.body.copy(color = C.accent), modifier = Modifier.tap { editing = null }.padding(vertical = 8.dp))
                         Text("Удалить", style = T.body.copy(color = C.dim), modifier = Modifier.tap {
+                            deleted = true
                             scope.launch { PlacesActions.delete(context, p); editing = null }
                         }.padding(vertical = 8.dp))
                     }
@@ -248,6 +266,11 @@ private fun NewPlacePage(nav: Nav) {
     val scope = rememberCoroutineScope()
     val pending = app.day.state.collectAsState().value.pendingPlace
     var name by remember { mutableStateOf("") }
+    var done by remember { mutableStateOf(false) }
+    OnLeave {
+        val p = pending
+        if (!done && p != null && name.isNotBlank()) PlacesActions.savePending(context, p, name)
+    }
     Page("Как назвать это место?") {
         Chips(listOf("Дом" to "Дом", "Работа" to "Работа", "Зал" to "Зал"), name.takeIf { it in setOf("Дом", "Работа", "Зал") }, { name = it })
         Gap(16.dp)
@@ -256,6 +279,7 @@ private fun NewPlacePage(nav: Nav) {
         Gap(32.dp)
         AccentButton("Сохранить", enabled = name.isNotBlank() && pending != null, onClick = {
             val p = pending ?: return@AccentButton
+            done = true
             scope.launch { PlacesActions.savePending(context, p, name); nav.back() }
         })
     }
@@ -312,7 +336,13 @@ private fun ServerPage(nav: Nav) {
     var url by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var pending by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { val p = app.repo.settings.get(); url = p.serverUrl; token = p.serverToken; pending = app.repo.db.outbox().pendingCount() }
+    var loaded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { val p = app.repo.settings.get(); url = p.serverUrl; token = p.serverToken; pending = app.repo.db.outbox().pendingCount(); loaded = true }
+    OnLeave {
+        if (!loaded) return@OnLeave
+        val p = app.repo.settings.get()
+        if (p.serverUrl != url.trim() || p.serverToken != token.trim()) { app.repo.settings.setServer(url, token); Work.syncNow(app) }
+    }
     Page("Сервер") {
         Text("Адрес", style = T.dim)
         BasicTextField(url, { url = it }, textStyle = T.body, cursorBrush = SolidColor(C.accent), singleLine = true,
@@ -414,6 +444,10 @@ private fun SleepPage(nav: Nav) {
     if (s == null) { LaunchedEffect(Unit) { nav.back() }; return }
     var start by remember { mutableStateOf(s.interval.start) }
     var end by remember { mutableStateOf(s.interval.end) }
+    var decided by remember { mutableStateOf(false) }
+    OnLeave {
+        if (!decided && (start != s.interval.start || end != s.interval.end)) { app.repo.markSleep(start, end, "edited"); app.day.refresh() }
+    }
     fun t(ms: Long) = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(hm)
     Page("Спал с ${t(start)} до ${t(end)}?") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -428,12 +462,14 @@ private fun SleepPage(nav: Nav) {
         }
         Gap(40.dp)
         AccentButton("Да", onClick = {
+            decided = true
             scope.launch {
                 val kind = if (start == s.interval.start && end == s.interval.end) "confirmed" else "edited"
                 app.repo.markSleep(start, end, kind); app.day.refresh(); nav.back()
             }
         })
         Text("Не спал", style = T.dim, modifier = Modifier.tap {
+            decided = true
             scope.launch { app.repo.markSleep(s.interval.start, s.interval.end, "rejected"); app.day.refresh(); nav.back() }
         }.padding(vertical = 20.dp))
     }
