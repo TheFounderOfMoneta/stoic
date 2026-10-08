@@ -48,7 +48,26 @@ sleep 4
 route workout 14-workout
 shot 15-home-during-workout 2
 
-# 5. Кнопка Bixby в эмуляторе не проверяется: как и на S10, она не доходит до спецвозможностей.
+# 5. Кнопка Bixby через системный журнал. В эмуляторе нет Samsung, поэтому пишем в журнал
+#    ровно такие строки, как S10+ (тег PhoneWindowManagerExt), с реальными интервалами нажатий.
+adb shell pm grant $PKG android.permission.READ_LOGS
+adb shell am force-stop $PKG; sleep 1
+adb shell am start -n $PKG/.ui.MainActivity > /dev/null; sleep 4
+L='getIntentBixbyService, keyPressType=-1 interactive=true isUnlockFP=false longPress=false doublePress=false isPowerKeyCombination=false'
+bx() { echo "log -p d -t PhoneWindowManagerExt '$L'"; }
+adb shell input keyevent KEYCODE_HOME; sleep 1
+# два нажатия — еда (нажал/отпустил 0,14 с, пауза 0,2 с)
+adb shell "$(bx); sleep 0.14; $(bx); sleep 0.2; $(bx); sleep 0.14; $(bx)"
+shot 16-bixby-double-food 3
+adb shell input keyevent KEYCODE_BACK; sleep 1
+# три нажатия — отметка момента
+adb shell "$(bx); sleep 0.12; $(bx); sleep 0.18; $(bx); sleep 0.12; $(bx); sleep 0.18; $(bx); sleep 0.12; $(bx)"
+sleep 2
+# удержание 1,5 с — голосовая заметка
+adb shell "$(bx); sleep 1.5; $(bx)"
+sleep 3
+route notes 17-notes-after-bixby
+route page:button 17b-button-page
 
 # 7. Шторка.
 adb shell input keyevent KEYCODE_WAKEUP; sleep 1
