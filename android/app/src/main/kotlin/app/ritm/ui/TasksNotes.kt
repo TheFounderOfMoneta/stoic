@@ -240,13 +240,13 @@ private fun NoteCard(n: NoteRow, onClick: () -> Unit) {
     val at = Instant.ofEpochMilli(n.at).atZone(ZoneId.systemDefault())
     Column(Modifier.fillMaxWidth().tap(onClick).padding(vertical = 14.dp)) {
         val head = when (n.kind) {
-            "moment" -> "⚑ ${at.format(timeFmt)}"
+            "moment" -> "⚑ ${at.format(dateTimeFmt)}"
             "voice" -> "▶ ${(n.audioMs ?: 0) / 1000 / 60}:${String.format(Locale.US, "%02d", (n.audioMs ?: 0) / 1000 % 60)}"
             else -> null
         }
         if (head != null) Text(head, style = T.body.copy(color = C.accent))
         if (n.text.isNotBlank()) Text(n.text, style = T.body, maxLines = 2)
-        Text(at.format(dateTimeFmt), style = T.dim)
+        if (n.kind != "moment") Text(at.format(dateTimeFmt), style = T.dim)
     }
 }
 

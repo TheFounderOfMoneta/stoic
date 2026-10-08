@@ -65,6 +65,8 @@ object C {
     val text = Color(0xFFF2F2F2)
     val dim = Color(0xFF8E8E93)
     val faint = Color(0xFF2C2C2E)
+    /** Подсказки в пустых полях: заметно, но тише текста. */
+    val hint = Color(0xFF5A5A5F)
     val ghost = Color(0xFF1A1A1C)
     val accent = Color(0xFF8FE3B8)
 }

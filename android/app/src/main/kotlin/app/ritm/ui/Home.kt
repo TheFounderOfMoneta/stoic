@@ -55,7 +55,7 @@ fun HomeScreen(nav: Nav, undo: UndoState) {
     val scope = rememberCoroutineScope()
 
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        Text("⋯", style = T.title.copy(color = C.faint), modifier = Modifier.align(Alignment.TopEnd).tap { nav.go(Route.Settings) }.padding(20.dp))
+        Text("⋯", style = T.title.copy(color = C.hint), modifier = Modifier.align(Alignment.TopEnd).tap { nav.go(Route.Settings) }.padding(20.dp))
 
         Column(Modifier.fillMaxSize().padding(top = 120.dp, bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             NowLine(state, nav)
@@ -63,7 +63,7 @@ fun HomeScreen(nav: Nav, undo: UndoState) {
             val r = state.remaining
             Column(Modifier.tap { nav.go(Route.FoodToday) }, horizontalAlignment = Alignment.CenterHorizontally) {
                 if (r == null) {
-                    Text("—", style = T.huge.copy(color = C.faint))
+                    Text("—", style = T.huge.copy(color = C.hint))
                     Text("ккал", style = T.dim)
                 } else {
                     FlowingNumber(abs(r))

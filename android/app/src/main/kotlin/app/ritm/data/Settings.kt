@@ -96,6 +96,7 @@ class Settings(private val context: Context) {
     )
 
     suspend fun ensureInstalledAt(now: Long) = context.store.edit { if (it[K.installedAt] == null) it[K.installedAt] = now }
+    suspend fun setInstalledAt(at: Long) = context.store.edit { it[K.installedAt] = at }
     suspend fun setOnboarded(v: Boolean) = context.store.edit { it[K.onboarded] = v }
     suspend fun setGoals(v: String) = context.store.edit { it[K.goals] = v }
     suspend fun setBody(sex: Sex, heightCm: Double, birth: LocalDate) = context.store.edit {

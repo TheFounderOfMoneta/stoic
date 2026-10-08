@@ -103,7 +103,7 @@ fun WorkoutScreen(nav: Nav, host: Host) {
     val ex = exercise
 
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        Text("⋯", style = T.title.copy(color = C.faint), modifier = Modifier.align(Alignment.TopEnd).tap { menu = !menu }.padding(20.dp))
+        Text("⋯", style = T.title.copy(color = C.hint), modifier = Modifier.align(Alignment.TopEnd).tap { menu = !menu }.padding(20.dp))
         if (menu) {
             Column(Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = 20.dp)) {
                 Text("Завершить", style = T.body, modifier = Modifier.tap {

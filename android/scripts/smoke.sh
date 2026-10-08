@@ -48,24 +48,30 @@ sleep 4
 route workout 14-workout
 shot 15-home-during-workout 2
 
-# 5. Кнопка Bixby через службу спецвозможностей (код 1082).
+# 5. Кнопка Bixby через службу спецвозможностей. В эмуляторе код Bixby (1082) недопустим,
+#    поэтому тестовая сборка слушает ещё и F12 — логика жестов та же.
 adb shell settings put secure enabled_accessibility_services $PKG/$PKG.button.ButtonService
 adb shell settings put secure accessibility_enabled 1
-sleep 4
-adb shell input keyevent KEYCODE_HOME; sleep 1
-adb shell input keyevent 1082 1082 1082   # три нажатия — отметка момента
+sleep 5
+adb shell dumpsys accessibility | grep -i "ritm" | head -5
+adb shell am start -n $PKG/.ui.MainActivity > /dev/null; sleep 2
+adb shell input keyevent KEYCODE_F12 KEYCODE_F12 KEYCODE_F12   # три — отметка момента
 sleep 2
-adb shell input keyevent 1082; sleep 0.15; adb shell input keyevent 1082   # два — еда
+adb shell input keyevent KEYCODE_F12 KEYCODE_F12               # два — еда (быстрый ввод)
 shot 16-bixby-double-food 3
 adb shell input keyevent KEYCODE_BACK; sleep 1
-adb shell input keyevent --longpress 1082   # удержание — голосовая заметка
+adb shell input keyevent KEYCODE_F12                           # одно — «+» (или подход на тренировке)
+shot 16b-bixby-single 3
+adb shell input keyevent KEYCODE_BACK; sleep 1
+adb shell input keyevent --longpress KEYCODE_F12               # удержание — голосовая заметка
 sleep 3
 route notes 17-notes-after-bixby
 
-# 6. Экран блокировки: двойное нажатие поверх блокировки.
-adb shell input keyevent KEYCODE_SLEEP; sleep 2
-adb shell input keyevent 1082; sleep 0.15; adb shell input keyevent 1082
+# 6. Экран блокировки: два нажатия при выключенном экране — еда поверх блокировки.
+adb shell input keyevent KEYCODE_SLEEP; sleep 3
+adb shell input keyevent KEYCODE_F12 KEYCODE_F12
 shot 18-locked-food 4
+adb shell input keyevent KEYCODE_BACK; sleep 1
 
 # 7. Шторка.
 adb shell input keyevent KEYCODE_WAKEUP; sleep 1
@@ -76,8 +82,8 @@ adb shell cmd statusbar collapse
 adb logcat -d > shots/logcat.txt
 adb shell dumpsys activity services $PKG > shots/services.txt
 adb shell run-as $PKG ls -la databases files > shots/files.txt 2>&1 || true
-if grep -E "FATAL EXCEPTION|Process: $PKG" shots/logcat.txt; then
-  grep -A 40 "FATAL EXCEPTION" shots/logcat.txt | head -120
+if grep -E "FATAL EXCEPTION|Process: $PKG|ANR in $PKG" shots/logcat.txt; then
+  grep -B 5 -A 40 -E "FATAL EXCEPTION|ANR in" shots/logcat.txt | head -160
   echo "CRASH FOUND"; exit 1
 fi
 echo "NO CRASHES"

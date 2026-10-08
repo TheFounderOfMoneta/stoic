@@ -323,7 +323,7 @@ fun AccessList(onAllDone: (() -> Unit)? = null) {
                 else -> context.startActivity(Permissions.settingsIntent(context, a))
             }
         }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (ok) "✓" else "○", style = T.title.copy(color = if (ok) C.accent else C.faint), modifier = Modifier.padding(end = 16.dp))
+            Text(if (ok) "✓" else "○", style = T.title.copy(color = if (ok) C.accent else C.dim), modifier = Modifier.padding(end = 16.dp))
             Column {
                 Text(a.title, style = T.body.copy(color = if (ok) C.dim else C.text))
                 Text(a.why, style = T.dim)
