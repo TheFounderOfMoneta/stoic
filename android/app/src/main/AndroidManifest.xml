@@ -20,6 +20,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Кнопка Bixby через системный журнал (S10 не отдаёт её спецвозможностям).
+         Выдаётся вручную один раз: adb shell pm grant app.ritm android.permission.READ_LOGS -->
+    <uses-permission android:name="android.permission.READ_LOGS" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
 
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -64,7 +67,7 @@
         <service
             android:name=".button.ButtonService"
             android:exported="false"
-            android:label="Ритм — кнопка слева"
+            android:label="Ритм — сон по касаниям"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

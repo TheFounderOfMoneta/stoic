@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import app.ritm.app
+import app.ritm.button.LogcatKeySource
 import app.ritm.core.steps.StepCounterTracker
 import app.ritm.data.DayFlagRow
 import app.ritm.data.StepRow
@@ -74,6 +75,7 @@ class CollectorService : LifecycleService() {
         lifecycleScope.launch { initialState() }
         startSteps()
         startTicks()
+        LogcatKeySource.start(this)
         observeSummary()
         scheduleWatchdogAlarm(this)
     }
@@ -83,11 +85,12 @@ class CollectorService : LifecycleService() {
         if (intent?.action == ACTION_TICK) lifecycleScope.launch { tick() }
         // Запуск из открытого приложения — переподнять службу с микрофоном: тест показал, что тогда голос
         // пишется и при выключенном экране, а без заранее поднятой службы микрофон отдаёт тишину.
-        else runCatching { goForeground() }
+        else { runCatching { goForeground() }; LogcatKeySource.start(this) }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        LogcatKeySource.stop()
         runCatching { unregisterReceiver(receiver) }
         stepListener?.let { getSystemService(SensorManager::class.java).unregisterListener(it) }
         super.onDestroy()

@@ -22,7 +22,8 @@ enum class Access(val title: String, val why: String) {
     MICROPHONE("Микрофон", "Чтобы записывать голосовые заметки кнопкой слева"),
     NOTIFICATIONS("Уведомления", "Чтобы в шторке был остаток калорий и напоминания"),
     USAGE("Статистика использования", "Чтобы знать экранное время"),
-    BUTTON("Кнопка слева", "Чтобы кнопка Bixby работала для Ритма"),
+    BUTTON("Кнопка слева", "Один раз с компьютера — и кнопка Bixby работает для Ритма"),
+    TOUCH("Касания", "Чтобы сон определялся по тому, трогаете ли вы телефон"),
     BATTERY("Работа в фоне", "Чтобы Samsung не усыплял сбор данных"),
 }
 
@@ -36,7 +37,8 @@ object Permissions {
         Access.MICROPHONE -> has(context, Manifest.permission.RECORD_AUDIO)
         Access.NOTIFICATIONS -> NotificationManagerCompat.from(context).areNotificationsEnabled()
         Access.USAGE -> usageGranted(context)
-        Access.BUTTON -> buttonServiceEnabled(context)
+        Access.BUTTON -> app.ritm.button.canReadLogs(context)
+        Access.TOUCH -> buttonServiceEnabled(context)
         Access.BATTERY -> (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
     }
 
@@ -54,7 +56,7 @@ object Permissions {
     /** Куда вести человека, если системным окном не спросить. */
     fun settingsIntent(context: Context, a: Access): Intent = when (a) {
         Access.USAGE -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-        Access.BUTTON -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        Access.TOUCH -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
         Access.BATTERY -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
         Access.NOTIFICATIONS -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         else -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))

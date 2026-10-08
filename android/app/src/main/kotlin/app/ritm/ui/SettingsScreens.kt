@@ -42,7 +42,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.ritm.BuildConfigProxy
 import app.ritm.app
-import app.ritm.button.ButtonService
+import app.ritm.button.ButtonBrain
+import app.ritm.button.LogcatKeySource
+import app.ritm.button.READ_LOGS_COMMAND
+import app.ritm.button.canReadLogs
 import app.ritm.collect.CollectorService
 import app.ritm.collect.LocationCollector
 import app.ritm.collect.PlacesActions
@@ -247,27 +250,47 @@ private fun NewPlacePage(nav: Nav) {
     }
 }
 
-/** Кнопка слева: включена ли служба, обучение кода клавиши (учим делом). */
+/** Кнопка слева: один раз команда с компьютера, дальше работает сама. Внизу — последние нажатия для проверки. */
 @Composable
 private fun ButtonPage() {
     val context = LocalContext.current
-    val running by ButtonService.running.collectAsState()
-    val learning by ButtonService.learning.collectAsState()
-    val learned by ButtonService.learned.collectAsState()
+    val active by LogcatKeySource.active.collectAsState()
+    val recent by ButtonBrain.recent.collectAsState()
+    val granted = canReadLogs(context)
     Page("Кнопка слева") {
         Text("Удержание — голосовая заметка (только микрофон телефона)\n1 нажатие — то, что сверху: подход, вес или «+»\n2 нажатия — еда\n3 нажатия — отметка момента", style = T.body)
-        Gap(32.dp)
-        if (!running) {
-            Item("Включить кнопку", "Спецвозможности → Ритм → включить. Bixby сначала отключите") {
-                context.startActivity(Permissions.settingsIntent(context, Access.BUTTON))
-            }
-        } else {
-            when {
-                learning -> Text("Нажмите кнопку слева…", style = T.title.copy(color = C.accent))
-                learned != null -> Text("Готово. Кнопка запомнена", style = T.title.copy(color = C.accent))
-                else -> Item("Не срабатывает?", "Нажмите здесь, затем кнопку слева — Ритм её запомнит") { ButtonService.learning.value = true }
-            }
+        Gap(28.dp)
+        when {
+            granted && active -> Text("Работает", style = T.title.copy(color = C.accent))
+            granted -> Text("Доступ есть, запускаю…", style = T.title.copy(color = C.dim))
+            else -> ReadLogsHint()
         }
+        if (recent.isNotEmpty()) {
+            Gap(28.dp)
+            Text("Последние нажатия", style = T.dim)
+            recent.take(8).forEach { Text(it, style = T.dim.copy(color = C.text)) }
+        }
+    }
+    LaunchedEffect(granted) { if (granted) CollectorService.start(context) }
+}
+
+/** Как выдать доступ: команда с компьютера + копирование. */
+@Composable
+fun ReadLogsHint() {
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().glass(18.dp).padding(18.dp)) {
+        Text("Один раз с компьютера", style = T.body)
+        Text("Подключите телефон по USB (отладка включена) и выполните:", style = T.dim)
+        Gap(10.dp)
+        Text(READ_LOGS_COMMAND, style = T.dim.copy(color = C.text, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+        Gap(12.dp)
+        Text(if (copied) "Скопировано" else "Скопировать команду", style = T.body.copy(color = C.accent), modifier = Modifier.tap {
+            val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("adb", READ_LOGS_COMMAND))
+            copied = true
+        }.padding(vertical = 6.dp))
+        Text("После этого ничего перезапускать не нужно — даже после перезагрузки. Ритм берёт из системного журнала только строки про кнопку.", style = T.dim)
     }
 }
 
@@ -311,12 +334,14 @@ fun AccessList(onAllDone: (() -> Unit)? = null) {
         if (Permissions.granted(context, Access.LOCATION)) LocationCollector.restart(context)
         if (missing.isEmpty()) onAllDone?.invoke()
     }
+    var showButtonHint by remember { mutableStateOf(false) }
     Access.entries.forEach { a ->
         val ok = a !in missing
         Row(Modifier.fillMaxWidth().tap {
             if (ok) return@tap
             val perm = Permissions.runtimePermission(a)
             when {
+                a == Access.BUTTON -> showButtonHint = !showButtonHint
                 a == Access.LOCATION -> launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                 a == Access.LOCATION_ALWAYS && !Permissions.granted(context, Access.LOCATION) -> launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
                 perm != null -> launcher.launch(arrayOf(perm))
@@ -329,6 +354,7 @@ fun AccessList(onAllDone: (() -> Unit)? = null) {
                 Text(a.why, style = T.dim)
             }
         }
+        if (a == Access.BUTTON && !ok && showButtonHint) ReadLogsHint()
     }
 }
 
@@ -427,20 +453,22 @@ fun OnboardingScreen(onFinish: () -> Unit) {
             AccentButton("Дальше", onClick = { step = 3 })
         }
         else -> {
-            val running by ButtonService.running.collectAsState()
-            val learned by ButtonService.learned.collectAsState()
-            LaunchedEffect(running) { if (running && learned == null) ButtonService.learning.value = true }
+            val granted = canReadLogs(context)
+            val recent by ButtonBrain.recent.collectAsState()
+            LaunchedEffect(granted) { if (granted) CollectorService.start(context) }
             Page("Кнопка слева") {
                 Text(
                     when {
-                        !running -> "Включите Ритм в спецвозможностях — тогда кнопка Bixby станет вашей"
-                        learned == null -> "Нажмите кнопку слева"
+                        !granted -> "Кнопка Bixby станет вашей: удержание — сказать мысль, два нажатия — еда"
+                        recent.isEmpty() -> "Нажмите кнопку слева"
                         else -> "Готово. Удерживайте её, чтобы сказать мысль"
                     },
-                    style = T.title.copy(color = if (learned != null) C.accent else C.text),
+                    style = T.title.copy(color = if (granted && recent.isNotEmpty()) C.accent else C.text),
                 )
-                Gap(40.dp)
-                AccentButton(if (learned != null) "Начать" else "Пропустить", onClick = { ButtonService.learning.value = false; finish() })
+                Gap(24.dp)
+                if (!granted) ReadLogsHint()
+                Gap(32.dp)
+                AccentButton(if (granted && recent.isNotEmpty()) "Начать" else if (granted) "Пропустить" else "Сделаю позже", onClick = { finish() })
             }
         }
     }

@@ -40,6 +40,7 @@ import app.ritm.collect.PlacesActions
 import app.ritm.core.day.NowItem
 import app.ritm.data.TaskRow
 import app.ritm.engine.DayState
+import app.ritm.engine.Access
 import app.ritm.engine.Permissions
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -110,7 +111,9 @@ private fun NowLine(state: DayState, nav: Nav) {
         when (state.nowItem) {
             NowItem.WORKOUT -> QuietLine("Тренировка", { nav.go(Route.Workout) })
             NowItem.PROBLEM -> state.problem?.let { p ->
-                QuietLine("Нет доступа: ${p.title.lowercase()}", { context.startActivity(Permissions.settingsIntent(context, p)) })
+                QuietLine(if (p == Access.BUTTON) "Включить кнопку слева" else "Нет доступа: ${p.title.lowercase()}", {
+                    if (p == Access.BUTTON) nav.go(Route.SettingsPage("button")) else context.startActivity(Permissions.settingsIntent(context, p))
+                })
             }
             NowItem.WEIGHT -> QuietLine("Вес сегодня?", { nav.go(Route.Weight) })
             NowItem.PLACE -> state.pendingPlace?.let { p ->
