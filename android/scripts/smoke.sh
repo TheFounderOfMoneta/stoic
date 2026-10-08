@@ -86,6 +86,27 @@ route page:button 11-button
 route page:advanced 12-advanced
 route page:goals 13-goals
 
+# 3б. Тренировка с нуля, как человек: выбрать упражнение из списка, своё — через «Добавить».
+adb shell am start -n $PKG/.ui.MainActivity --es route workout > /dev/null; sleep 3
+expect "Выбрать упражнение"
+shot 13b-workout-empty 1
+tap_text "Выбрать упражнение"
+expect "Жим лёжа" "Подтягивания"
+shot 13c-exercise-list 1
+tap_text "Подтягивания"
+expect "Подтягивания" "Подход" "сделали подход — нажмите"
+tap_text "Подход"
+expect "подходов: 1"
+shot 13d-workout-first-set 1
+tap_text "сменить упражнение"
+tap_text "Найти или ввести своё" && { adb shell input text "Face%spull"; sleep 1; }
+expect "+ Добавить «Face pull»"
+shot 13e-exercise-custom 1
+tap_text "+ Добавить «Face pull»"
+expect "Face pull" "Подход"
+tap_text "Завершить"
+sleep 2
+
 # 4. Тренировка с подходами и отдыхом.
 adb shell am start -n $PKG/.ui.MainActivity --es demo workout > /dev/null
 sleep 4

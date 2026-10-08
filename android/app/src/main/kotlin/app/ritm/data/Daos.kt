@@ -107,7 +107,7 @@ interface WorkoutDao {
     @Update suspend fun updateExercise(e: ExerciseRow)
     @Query("SELECT * FROM exercises WHERE name = :name") suspend fun exercise(name: String): ExerciseRow?
     @Query("SELECT * FROM exercises WHERE id = :id") suspend fun exerciseById(id: Long): ExerciseRow?
-    @Query("SELECT * FROM exercises ORDER BY uses DESC, usedAt DESC") fun exercisesFlow(): Flow<List<ExerciseRow>>
+    @Query("SELECT * FROM exercises ORDER BY uses DESC, usedAt DESC, name") fun exercisesFlow(): Flow<List<ExerciseRow>>
 }
 
 @Dao

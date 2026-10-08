@@ -51,6 +51,11 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
         if (db.food().productCount() == 0) {
             db.food().insertProducts(seed.map { ProductRow(name = it.n, kcal100 = it.k, protein = it.p, fat = it.f, carbs = it.c) })
         }
+        // Готовые упражнения — выбрать нажатием, без ввода. Один раз: удалённые не возвращаются.
+        if (db.days().flag("seed|exercises") == null) {
+            BASE_EXERCISES.forEach { db.workouts().insertExercise(ExerciseRow(name = it)) }
+            db.days().setFlag(DayFlagRow("seed|exercises"))
+        }
     }
 
     /** Граммы по умолчанию: прошлый раз, иначе обычная порция, иначе 100. */
@@ -354,6 +359,14 @@ class Repo(private val context: Context, val db: RitmDb, val settings: Settings)
 
     fun localDate(at: Long): LocalDate = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault()).toLocalDate()
 }
+
+val BASE_EXERCISES = listOf(
+    "Жим лёжа", "Приседания со штангой", "Становая тяга", "Подтягивания", "Отжимания", "Отжимания на брусьях",
+    "Тяга верхнего блока", "Тяга штанги в наклоне", "Тяга гантели в наклоне", "Жим гантелей лёжа", "Жим гантелей сидя",
+    "Жим штанги стоя", "Махи гантелями в стороны", "Подъём штанги на бицепс", "Подъём гантелей на бицепс",
+    "Французский жим", "Разгибания на трицепс в блоке", "Жим ногами", "Выпады", "Румынская тяга",
+    "Разгибания ног", "Сгибания ног", "Подъём на носки", "Гиперэкстензия", "Скручивания", "Планка",
+)
 
 /** Черновик полей тренировки: мой последний ввод в упражнении (до записи подхода). */
 object WorkoutDraft {
