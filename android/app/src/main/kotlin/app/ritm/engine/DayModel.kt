@@ -8,6 +8,8 @@ import app.ritm.core.energy.CycleEnergy
 import app.ritm.core.energy.averageActivity
 import app.ritm.core.energy.cycleExpenditure
 import app.ritm.core.energy.dailyPlan
+import app.ritm.core.energy.GoalType
+import app.ritm.core.energy.WeightGoal
 import app.ritm.core.energy.weightTrend
 import app.ritm.core.food.shouldRemindFood
 import app.ritm.core.food.weightCardVisible
@@ -123,7 +125,7 @@ class DayModel(private val context: Context, private val repo: Repo) {
                 val cycle = timeline.cycleOf(i, now)
                 cycleExpenditure(body, weightNow, cycle, timeline.days[i].date, steps, workouts)
             }
-            dailyPlan(body, weightNow, date, prefs.goal, averageActivity(cycles), prefs.calibration)
+            dailyPlan(body, weightNow, date, WeightGoal(GoalType.KEEP, 0.0), averageActivity(cycles), prefs.calibration)
         } else null
 
         val workout = db.workouts().active()

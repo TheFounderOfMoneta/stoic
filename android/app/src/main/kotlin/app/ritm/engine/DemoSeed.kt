@@ -3,7 +3,6 @@ package app.ritm.engine
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import app.ritm.app
-import app.ritm.core.energy.GoalType
 import app.ritm.core.energy.Sex
 import java.time.LocalDate
 
@@ -18,12 +17,12 @@ object DemoSeed {
         if (!debuggable) return
         when (kind) {
             "seed" -> {
-                if (repo.settings.get().onboarded) return
+                if (repo.db.days().flag("demo|seeded") != null) return
+                repo.db.days().setFlag(app.ritm.data.DayFlagRow("demo|seeded"))
                 // День начался 6 часов назад — чтобы демо-еда попала в сегодняшний день.
                 repo.settings.setInstalledAt(System.currentTimeMillis() - 6 * 3600_000L)
                 repo.settings.setGoals("Похудеть до 78 кг, тренироваться 3 раза в неделю")
                 repo.settings.setBody(Sex.MALE, 181.0, LocalDate.of(1995, 7, 1))
-                repo.settings.setGoal(GoalType.LOSE, 0.5)
                 repo.addWeight(82.4, System.currentTimeMillis() - 3 * 3600_000L)
                 repo.seedProducts()
                 listOf("Овсянка на молоке" to 250.0, "Банан" to 120.0, "Кофе чёрный" to 200.0, "Гречка варёная" to 200.0, "Куриная грудка варёная" to 150.0)

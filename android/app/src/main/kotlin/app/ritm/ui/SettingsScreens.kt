@@ -50,6 +50,9 @@ import app.ritm.collect.CollectorService
 import app.ritm.collect.LocationCollector
 import app.ritm.collect.PlacesActions
 import app.ritm.core.energy.Body
+import app.ritm.core.energy.Energy
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlin.math.roundToInt
 import app.ritm.core.energy.GoalType
 import app.ritm.core.energy.Sex
 import app.ritm.core.energy.WeightGoal
@@ -90,7 +93,7 @@ fun SettingsScreen(nav: Nav) {
     val prefs by LocalContext.current.app.repo.settings.flow.collectAsState(initial = null)
     Page(null) {
         Item("Цели", "На что ориентируются ИИ и сводки") { nav.go(Route.SettingsPage("goals")) }
-        Item("Тело и норма", "Пол, рост, возраст, цель — отсюда норма калорий") { nav.go(Route.SettingsPage("body")) }
+        Item("Тело", "Пол, рост, возраст, вес — отсюда базовый расход") { nav.go(Route.SettingsPage("body")) }
         Item("Мои места", "Дом, работа, зал — по ним сон и тренировки") { nav.go(Route.SettingsPage("places")) }
         Item("Кнопка слева", "Удержание — голос, 1 — главное, 2 — еда, 3 — момент") { nav.go(Route.SettingsPage("button")) }
         val sync = prefs?.lastSyncAt?.takeIf { it > 0 }?.let { "отправлено ${ago(it)}" } ?: "сервер не задан"
@@ -143,58 +146,66 @@ fun GoalsPage(nav: Nav?, onNext: (() -> Unit)? = null) {
 }
 
 
-/** Пол, рост, дата рождения, вес, цель и темп — на одном экране; внизу норма. */
+/**
+ * Пол, рост, год рождения, вес — из них считается только базовый расход (Миффлин — Сан Жеор).
+ * Цели по весу здесь нет: по этим данным её не определить.
+ */
 @Composable
 fun BodyPage(nav: Nav?, onNext: (() -> Unit)? = null) {
     val app = LocalContext.current.app
     val scope = rememberCoroutineScope()
-    var sex by remember { mutableStateOf<Sex?>(null) }
-    var height by remember { mutableDoubleStateOf(175.0) }
-    var birthYear by remember { mutableIntStateOf(1995) }
-    var weight by remember { mutableDoubleStateOf(75.0) }
-    var goal by remember { mutableStateOf(GoalType.LOSE) }
-    var pace by remember { mutableDoubleStateOf(0.5) }
-    var hadWeight by remember { mutableStateOf(false) }
+    var sex by rememberSaveable { mutableStateOf<Sex?>(null) }
+    var height by rememberSaveable { mutableDoubleStateOf(175.0) }
+    var birthYear by rememberSaveable { mutableIntStateOf(1995) }
+    var weight by rememberSaveable { mutableDoubleStateOf(75.0) }
+    var loaded by rememberSaveable { mutableStateOf(false) }
+    var savedWeight by rememberSaveable { mutableStateOf<Double?>(null) }
     LaunchedEffect(Unit) {
+        if (loaded) return@LaunchedEffect
         val p = app.repo.settings.get()
-        sex = p.sex; p.heightCm?.let { height = it }; p.birthDate?.let { birthYear = it.year }
-        goal = p.goalType; pace = p.paceKgPerWeek
-        app.repo.lastWeight()?.let { weight = it.kg; hadWeight = true }
+        p.sex?.let { sex = it }; p.heightCm?.let { height = it }; p.birthDate?.let { birthYear = it.year }
+        app.repo.lastWeight()?.let { weight = it.kg; savedWeight = it.kg }
+        loaded = true
     }
     val birth = LocalDate.of(birthYear, 7, 1)
-    val norm = sex?.let { dailyPlan(Body(it, height, birth), weight, LocalDate.now(), WeightGoal(goal, pace), null) }
-    Page(if (onNext != null) "О себе" else "Тело и норма") {
+    val bmr = sex?.let { Energy.bmrPerDay(Body(it, height, birth), weight, LocalDate.now()).roundToInt() }
+    Page(if (onNext != null) "О себе" else "Тело") {
         Chips(listOf(Sex.MALE to "Мужчина", Sex.FEMALE to "Женщина"), sex, { sex = it })
-        Gap(24.dp)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            WheelNumber(height, { height = it }, 1.0, "рост, см", style = T.title, min = 120.0, max = 230.0)
-            WheelNumber(birthYear.toDouble(), { birthYear = it.toInt() }, 1.0, "год рождения", style = T.title, min = 1930.0, max = LocalDate.now().year - 10.0)
-            WheelNumber(weight, { weight = it }, 0.1, "вес, кг", decimals = 1, style = T.title, min = 30.0, max = 250.0, stepDp = 14.dp)
+        Gap(28.dp)
+        BodyRow("Рост") { WheelNumber(height, { height = it }, 1.0, "см", style = T.title, min = 120.0, max = 230.0) }
+        BodyRow("Год рождения") { WheelNumber(birthYear.toDouble(), { birthYear = it.toInt() }, 1.0, "", style = T.title, min = 1930.0, max = LocalDate.now().year - 10.0) }
+        BodyRow("Вес") { WheelNumber(weight, { weight = it }, 0.1, "кг", decimals = 1, style = T.title, min = 30.0, max = 250.0, stepDp = 14.dp) }
+        Gap(28.dp)
+        if (bmr != null) {
+            Text("Базовый расход", style = T.dim)
+            Text("≈ ${formatInt(bmr)} ккал в день", style = T.title.copy(color = C.accent))
+            Text("Столько тело тратит в покое. Шаги и тренировки Ритм добавит сам по данным.", style = T.dim)
+        } else {
+            Text("Выберите пол — посчитаю базовый расход", style = T.dim)
         }
-        Gap(32.dp)
-        Chips(listOf(GoalType.LOSE to "Снизить", GoalType.KEEP to "Держать", GoalType.GAIN to "Набрать"), goal, { goal = it })
-        if (goal != GoalType.KEEP) {
-            Gap(12.dp)
-            Chips(listOf(0.25 to "0,25", 0.5 to "0,5", 0.75 to "0,75"), pace, { pace = it })
-            Text("кг в неделю", style = T.dim, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
-        }
-        Gap(32.dp)
-        if (norm != null) Text("≈ ${formatInt(norm)} ккал в день", style = T.title.copy(color = C.accent))
         Gap(32.dp)
         AccentButton(if (onNext != null) "Дальше" else "Готово", enabled = sex != null, onClick = {
             val s = sex ?: return@AccentButton
             scope.launch {
                 app.repo.settings.setBody(s, height, birth)
-                app.repo.settings.setGoal(goal, pace)
-                if (!hadWeight || app.repo.lastWeight()?.kg != weight) app.repo.addWeight(weight)
+                app.repo.settings.setGoal(GoalType.KEEP, 0.0)
+                if (savedWeight == null || kotlin.math.abs(savedWeight!! - weight) > 0.05) { app.repo.addWeight(weight); savedWeight = weight }
                 app.repo.events.emit("profile.body") {
                     put("sex", s.name); put("heightCm", height); put("birthYear", birthYear)
-                    put("goal", goal.name); put("pace", pace)
                 }
                 app.day.refresh()
                 onNext?.invoke() ?: nav?.back()
             }
         })
+    }
+}
+
+/** Строка «подпись — цифра»: понятно, что крутить и куда нажимать. */
+@Composable
+private fun BodyRow(label: String, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).glass(18.dp).padding(start = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = T.body, modifier = Modifier.weight(1f))
+        content()
     }
 }
 
@@ -434,7 +445,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
     val context = LocalContext.current
     val app = context.app
     val scope = rememberCoroutineScope()
-    var step by remember { mutableIntStateOf(0) }
+    var step by rememberSaveable { mutableIntStateOf(0) }
     fun finish() = scope.launch {
         app.repo.settings.setOnboarded(true)
         CollectorService.start(context)

@@ -39,6 +39,7 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:configChanges="uiMode|keyboard|keyboardHidden|navigation|screenSize|smallestScreenSize|screenLayout|orientation|density|fontScale|locale|layoutDirection"
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
@@ -51,6 +52,7 @@
         <activity
             android:name=".ui.QuickActivity"
             android:exported="false"
+            android:configChanges="uiMode|keyboard|keyboardHidden|navigation|screenSize|smallestScreenSize|screenLayout|orientation|density|fontScale|locale|layoutDirection"
             android:excludeFromRecents="true"
             android:taskAffinity="app.ritm.quick"
             android:launchMode="singleTask"

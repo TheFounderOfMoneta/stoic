@@ -55,6 +55,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -278,20 +283,37 @@ fun WheelNumber(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (editing) {
-            var text by remember { mutableStateOf(fmt(value, decimals).replace('.', ',')) }
+            // Ввод с клавиатуры: поле шириной с число (не выталкивает соседей), старое значение выделено —
+            // новое печатается поверх; сохраняется и по «Готово», и когда уходишь с поля.
+            val initial = remember { fmt(value, decimals).replace('.', ',') }
+            var tf by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
             val fr = remember { FocusRequester() }
+            var focused by remember { mutableStateOf(false) }
+            val commitChange by rememberUpdatedState(onChange)
+            fun commit() {
+                if (!editing) return
+                tf.text.replace(',', '.').toDoubleOrNull()?.let { commitChange(it.coerceIn(min, max)) }
+                editing = false
+            }
             BasicTextField(
-                value = text,
-                onValueChange = { text = it.filter { c -> c.isDigit() || c == ',' || c == '.' }.take(7) },
+                value = tf,
+                onValueChange = { v ->
+                    val clean = v.text.filter { c -> c.isDigit() || ((c == ',' || c == '.') && decimals > 0) }.take(7)
+                    tf = if (clean == v.text) v else TextFieldValue(clean, TextRange(clean.length))
+                },
                 textStyle = style.copy(textAlign = TextAlign.Center, color = C.accent),
                 cursorBrush = SolidColor(Color.White),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    text.replace(',', '.').toDoubleOrNull()?.let { onChange(it.coerceIn(min, max)) }
-                    editing = false
-                }),
-                modifier = Modifier.width(220.dp).focusRequester(fr),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = if (decimals > 0) KeyboardType.Decimal else KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { commit() }),
+                modifier = Modifier
+                    .width(IntrinsicSize.Min)
+                    .widthIn(min = 40.dp, max = 200.dp)
+                    .focusRequester(fr)
+                    .onFocusChanged { f -> if (f.isFocused) focused = true else if (focused) commit() },
             )
             LaunchedEffect(Unit) { fr.requestFocus() }
         } else {
